@@ -1,0 +1,5 @@
+/cert/*
+.env
+*.json
+node_modules/*
+card_to_db.js
