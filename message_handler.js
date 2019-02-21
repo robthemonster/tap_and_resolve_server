@@ -119,6 +119,9 @@ app.post('/removeCardFromBlocked', (req, res, next) => {
 
 app.post('/searchForCard', (req, res, next) => {
     let searchString = req.body.searchString.toLowerCase();
+    if (searchString.length < 3) {
+        res.json("SEARCH TOO SHORT");
+    }
     let userid = req.body.userid;
     let likedParams = queryAllForUserParams(LIKED_TABLE, userid);
     let blockedParams = queryAllForUserParams(BLOCKED_TABLE, userid);
@@ -136,11 +139,18 @@ app.post('/searchForCard', (req, res, next) => {
     let results = [];
     for (let index in cards) {
         let card = cards[index];
-        if (!taken.has(card.id) && card.name.toLowerCase().startsWith(searchString)) {
+        if (!taken.has(card.id) && card.name.toLowerCase().includes(searchString)) {
             results.push(card);
         }
     }
-    res.json(results);
+    results.sort((a, b) => {
+        return a.name.toLowerCase().indexOf(searchString) - b.name.toLowerCase().indexOf(searchString)
+    });
+    let autocomplete = {};
+    for (let i = 0; i < results.length-1 && Object.keys(autocomplete).length < 10; i++) {
+        autocomplete[results[i].name] = (results[i].image_uris) ? results[i].image_uris.small : null;
+    }
+    res.json({results: results, autocomplete: autocomplete});
 });
 
 
