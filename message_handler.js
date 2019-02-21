@@ -48,44 +48,22 @@ function queryAllForUserParams(tablename, userid) {
     };
 }
 
-app.post('/getLiked', (req, res, next) => {
-    let userid = req.body.userid;
-    let likedUuids = [];
-    db.query(queryAllForUserParams(LIKED_TABLE, userid)).promise().then(result => {
+function getAllFromTable(tablename, userid, res) {
+    let cardsInTable = [];
+    db.query(queryAllForUserParams(tablename, userid)).promise().then(result => {
         result.Items.forEach(item => {
             let uuid = item.uuid.S;
-            let name = cards[cardKeys[uuidToIndex[uuid]]].name;
-            likedUuids.push({uuid: uuid, name: name});
+            cardsInTable.push(cards[cardKeys[uuidToIndex[uuid]]]);
         });
-        likedUuids.sort((a,b) => {return a.name < b.name ? -1 : 1});
-        res.json(likedUuids);
-    });
-});
-app.post('/getBlocked', (req, res, next) => {
-    let userid = req.body.userid;
-    let blockedUuids = [];
-    db.query(queryAllForUserParams(BLOCKED_TABLE, userid)).promise().then(result => {
-        result.Items.forEach(item => {
-            let uuid = item.uuid.S;
-            let name = cards[cardKeys[uuid]].name;
-            blockedUuids.push({uuid: uuid, name: name});
+        cardsInTable.sort((a, b) => {
+            return a.name < b.name ? -1 : 1
         });
-        res.json(blockedUuids);
+        res.json(cardsInTable);
     });
-});
-
-async function putItemInTable(tablename, item) {
-    return db.putItem({TableName: tablename, Item: item}).promise();
 }
 
-async function removeItemFromTable(tablename, key) {
-    return db.deleteItem({TableName: tablename, Key: key}).promise();
-}
-
-app.post('/addCardToLiked', (req, res, next) => {
-    let userid = req.body.userid;
-    let uuid = req.body.uuid;
-    putItemInTable(LIKED_TABLE, {'userid': {'S': userid}, 'uuid': {'S': uuid}})
+function putCardInTable(tablename, userid, uuid, res) {
+    db.putItem({TableName: tablename, Item: {'userid': {'S': userid}, 'uuid': {'S': uuid}}}).promise()
         .then(result => {
             console.log("successfully added to liked");
             res.json(result);
@@ -93,42 +71,51 @@ app.post('/addCardToLiked', (req, res, next) => {
         .catch(error => {
             console.log(error);
         });
+}
+
+function removeCardFromTable(tablename, userid, uuid, res) {
+    db.deleteItem({TableName: tablename, Key: {'userid': {'S': userid}, 'uuid': {'S': uuid}}}).promise()
+        .then(result => {
+            res.json(result);
+        })
+        .catch(error => {
+            console.log(error);
+        });
+}
+
+app.post('/getBlocked', (req, res, next) => {
+    let userid = req.body.userid;
+    getAllFromTable(BLOCKED_TABLE, userid, res)
+});
+
+app.post('/getLiked', (req, res, next) => {
+    let userid = req.body.userid;
+    getAllFromTable(LIKED_TABLE, userid, res);
+});
+
+app.post('/addCardToLiked', (req, res, next) => {
+    let userid = req.body.userid;
+    let uuid = req.body.uuid;
+    putCardInTable(LIKED_TABLE, userid, uuid, res);
 });
 
 app.post('/addCardToBlocked', (req, res, next) => {
     let userid = req.body.userid;
     let uuid = req.body.uuid;
-    putItemInTable(BLOCKED_TABLE, {'userid': {'S': userid}, 'uuid': {'S': uuid}})
-        .then(result => {
-            res.json(result);
-        })
-        .catch(error => {
-            console.log(error);
-        });
+    putCardInTable(BLOCKED_TABLE, userid, uuid, res);
+
 });
 
 app.post('/removeCardFromLiked', (req, res, next) => {
     let userid = req.body.userid;
     let uuid = req.body.uuid;
-    removeItemFromTable(LIKED_TABLE, {'userid': {'S': userid}, 'uuid': {'S': uuid}})
-        .then(result => {
-            res.json(result);
-        })
-        .catch(error => {
-            console.log(error);
-        });
+    removeCardFromTable(LIKED_TABLE, userid, uuid, res);
 });
 
 app.post('/removeCardFromBlocked', (req, res, next) => {
     let userid = req.body.userid;
     let uuid = req.body.uuid;
-    removeItemFromTable(BLOCKED_TABLE, {'userid': {'S': userid}, 'uuid': {'S': uuid}})
-        .then(result => {
-            res.json(result);
-        })
-        .catch(error => {
-            console.log(error);
-        });
+    removeCardFromTable(BLOCKED_TABLE, userid, uuid, res);
 });
 
 app.post('/searchForCard', (req, res, next) => {
@@ -151,7 +138,7 @@ app.post('/searchForCard', (req, res, next) => {
     for (let key in cardKeys) {
         let card = cards[cardKeys[key]];
         if (!taken.has(card.uuid) && card.name.toLowerCase().startsWith(searchString)) {
-            results.push(card.uuid);
+            results.push(card);
         }
     }
     res.json(results);
@@ -191,12 +178,9 @@ app.post("/randomCard", (req, res, next) => {
                 }
             }
         }
-        res.json(uuid);
+        res.json(cards[cardKeys[uuidToIndex[uuid]]]);
     });
 });
 
-function printError(err) {
-    console.log(err);
-}
 
 httpsServer.listen(443, () => console.log('listening'));
