@@ -121,6 +121,7 @@ app.post('/searchForCard', (req, res, next) => {
     let searchString = req.body.searchString.toLowerCase();
     if (searchString.length < 3) {
         res.json("SEARCH TOO SHORT");
+        return;
     }
     let userid = req.body.userid;
     let likedParams = queryAllForUserParams(LIKED_TABLE, userid);
