@@ -64,7 +64,6 @@ function getAllFromTable(tablename, userid, res) {
 function putCardInTable(tablename, userid, uuid, res) {
     db.putItem({TableName: tablename, Item: {'userid': {'S': userid}, 'uuid': {'S': uuid}}}).promise()
         .then(result => {
-            console.log("successfully added to liked");
             res.json(result);
         })
         .catch(error => {
@@ -117,13 +116,36 @@ app.post('/removeCardFromBlocked', (req, res, next) => {
     removeCardFromTable(BLOCKED_TABLE, userid, uuid, res);
 });
 
+app.post('/getUserCardStatus', (req, res, next) => {
+    let userid = req.body.userid;
+    let uuid = req.body.uuid;
+
+    let existsInLikedParams = {
+        TableName: LIKED_TABLE,
+        KeyConditionExpression: "userid = :userid and #uuid = :uuid",
+        ExpressionAttributeValues: {":userid": {'S': userid}, ':uuid': {'S': uuid}},
+        ExpressionAttributeNames: {"#uuid": "uuid"}
+    };
+    let existsInBlockedParams = {
+        TableName: BLOCKED_TABLE,
+        KeyConditionExpression: "userid = :userid and #uuid = :uuid",
+        ExpressionAttributeValues: {":userid": {'S': userid}, ':uuid': {'S': uuid}},
+        ExpressionAttributeNames: {"#uuid": "uuid"}
+    };
+    Promise.all([db.query(existsInLikedParams).promise(), db.query(existsInBlockedParams).promise()])
+        .then(([resLiked, resBlocked]) => {
+            res.json({liked: resLiked.Count > 0, blocked: resBlocked.Count > 0});
+        });
+});
+
 app.post('/searchForCard', (req, res, next) => {
     let searchString = req.body.searchString.toLowerCase();
     if (searchString.length < 3) {
-        res.json("SEARCH TOO SHORT");
+        res.json({results: [[]], autocomplete: {}});
         return;
     }
     let userid = req.body.userid;
+    let pagesize = req.body.pagesize;
     let likedParams = queryAllForUserParams(LIKED_TABLE, userid);
     let blockedParams = queryAllForUserParams(BLOCKED_TABLE, userid);
     let taken = new Set();
@@ -147,17 +169,24 @@ app.post('/searchForCard', (req, res, next) => {
     results.sort((a, b) => {
         return a.name.toLowerCase().indexOf(searchString) - b.name.toLowerCase().indexOf(searchString)
     });
+    let pageCtr = 0;
+    let paginatedResults = [[]];
+    for (let i = 0; i < results.length; i++) {
+        if (paginatedResults[pageCtr].length >= pagesize) {
+            pageCtr++;
+            paginatedResults[pageCtr] = [];
+        }
+        paginatedResults[pageCtr].push(results[i]);
+    }
     let autocomplete = {};
-    for (let i = 0; i < results.length-1 && Object.keys(autocomplete).length < 10; i++) {
+    for (let i = 0; i < results.length - 1 && Object.keys(autocomplete).length < 10; i++) {
         autocomplete[results[i].name] = (results[i].image_uris) ? results[i].image_uris.small : null;
     }
-    res.json({results: results, autocomplete: autocomplete});
+    res.json({results: paginatedResults, autocomplete: autocomplete});
 });
-
 
 app.post("/randomCard", (req, res, next) => {
     let userid = req.body.userid;
-    console.log("userid " + userid);
     let uuid = cards[randomInt(0, cards.length - 1)].id;
     let likedParams = queryAllForUserParams(LIKED_TABLE, userid);
     let blockedParams = queryAllForUserParams(BLOCKED_TABLE, userid);
@@ -191,6 +220,5 @@ app.post("/randomCard", (req, res, next) => {
         res.json(cards[uuidToIndex[uuid]]);
     });
 });
-
 
 httpsServer.listen(443, () => console.log('listening'));
