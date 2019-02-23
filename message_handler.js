@@ -13,8 +13,15 @@ let https = require('https');
 let fs = require('fs');
 let cards = require("./scryfall-default-cards");
 let uuidToIndex = {};
+let cardsContainingColor = {"R": new Set(), "U": new Set(), "G": new Set(), "B": new Set(), "W": new Set()};
 for (let i = 0; i < cards.length; i++) {
     uuidToIndex[cards[i].id] = i;
+    let colors = cards[i].colors;
+    if (colors) {
+        colors.forEach(color => {
+            cardsContainingColor[color].add(cards[i].id);
+        });
+    }
 }
 
 let privateKey = fs.readFileSync('./cert/privkey.pem', 'utf8');
@@ -30,14 +37,6 @@ const BLOCKED_TABLE = "cards_blocked";
 function randomInt(min, max) {
     return min + Math.floor(Math.random() * (max - min));
 }
-
-let httpsServer = https.createServer(credentials, app);
-
-app.use(function (req, res, next) {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-    next();
-});
 
 function queryAllForUserParams(tablename, userid) {
     return {
@@ -80,6 +79,14 @@ function removeCardFromTable(tablename, userid, uuid, res) {
             console.log(error);
         });
 }
+
+let httpsServer = https.createServer(credentials, app);
+
+app.use(function (req, res, next) {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    next();
+});
 
 app.post('/getBlocked', (req, res, next) => {
     let userid = req.body.userid;
@@ -179,7 +186,7 @@ app.post('/searchForCard', (req, res, next) => {
         paginatedResults[pageCtr].push(results[i]);
     }
     let autocomplete = {};
-    for (let i = 0; i < results.length - 1 && Object.keys(autocomplete).length < 10; i++) {
+    for (let i = 0; i < results.length; i++) {
         autocomplete[results[i].name] = (results[i].image_uris) ? results[i].image_uris.small : null;
     }
     res.json({results: paginatedResults, autocomplete: autocomplete});
@@ -188,6 +195,23 @@ app.post('/searchForCard', (req, res, next) => {
 app.post("/randomCard", (req, res, next) => {
     let userid = req.body.userid;
     let uuid = cards[randomInt(0, cards.length - 1)].id;
+    let filterSettings = req.body.filter;
+    let exclusive = undefined;
+    let flags = undefined;
+    if (filterSettings) {
+        filterSettings = JSON.parse(filterSettings);
+        exclusive = filterSettings.exclusive;
+        flags = filterSettings.flags;
+        if (!exclusive) {
+            let noFilter = true;
+            for (let key in flags) {
+                noFilter &= flags[key];
+            }
+            if (noFilter) {
+                filterSettings = false;
+            }
+        }
+    }
     let likedParams = queryAllForUserParams(LIKED_TABLE, userid);
     let blockedParams = queryAllForUserParams(BLOCKED_TABLE, userid);
     let liked_promise = db.query(likedParams).promise();
@@ -196,18 +220,35 @@ app.post("/randomCard", (req, res, next) => {
     Promise.all([liked_promise, blocked_promise]).then(([res1, res2]) => {
         let taken = new Set();
         res1.Items.forEach(item => {
-            taken.add(item.uuid);
+            taken.add(item.uuid.S);
         });
         res2.Items.forEach(item => {
-            taken.add(item.uuid);
+            taken.add(item.uuid.S);
         });
+        if (filterSettings) {
+            cards.forEach(card => {
+                for (let color in flags) {
+                    if (flags[color]) {
+                        if (exclusive) {
+                            if (!cardsContainingColor[color].has(card.id)) {
+                                taken.add(card.id);
+                            }
+                        }
+                    } else {
+                        if (cardsContainingColor[color].has(card.id)) {
+                            taken.add(card.id);
+                        }
+                    }
+                }
+            });
+        }
         if (taken.has(uuid)) {
             if (taken.size >= cards.length / 2) {
                 let rand = [];
                 for (let i = 0; i < cards.length; i++) {
-                    let uuid = cards[i].id;
-                    if (!taken.has(uuid)) {
-                        rand.push(uuid);
+                    let candidateUuid = cards[i].id;
+                    if (!taken.has(candidateUuid)) {
+                        rand.push(candidateUuid);
                     }
                 }
                 uuid = rand[randomInt(0, rand.length - 1)];
@@ -218,7 +259,9 @@ app.post("/randomCard", (req, res, next) => {
             }
         }
         res.json(cards[uuidToIndex[uuid]]);
-    });
-});
+    })
+    ;
+})
+;
 
 httpsServer.listen(443, () => console.log('listening'));
