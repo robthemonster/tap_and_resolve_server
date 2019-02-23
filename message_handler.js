@@ -214,8 +214,14 @@ app.post("/randomCard", (req, res, next) => {
     }
     let likedParams = queryAllForUserParams(LIKED_TABLE, userid);
     let blockedParams = queryAllForUserParams(BLOCKED_TABLE, userid);
-    let liked_promise = db.query(likedParams).promise();
-    let blocked_promise = db.query(blockedParams).promise();
+    let liked_promise, blocked_promise;
+    if (userid) {
+        liked_promise = db.query(likedParams).promise();
+        blocked_promise = db.query(blockedParams).promise();
+    } else {
+        liked_promise = {Items:[]};
+        blocked_promise = {Items:[]};
+    }
 
     Promise.all([liked_promise, blocked_promise]).then(([res1, res2]) => {
         let taken = new Set();
