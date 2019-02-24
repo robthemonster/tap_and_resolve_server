@@ -1,6 +1,11 @@
 'use strict';
 
+const AUTH_FAILED_MESSAGE = "Failed to authenticate user";
+
+
 let dotenv = require('dotenv');
+let AUTH_SERVER = "tapandresolve.tk";
+let AUTH_PATH = "/.netlify/identity/user";
 dotenv.config();
 
 let express = require('express');
@@ -66,7 +71,7 @@ function putCardInTable(tablename, userid, uuid, res) {
             res.json(result);
         })
         .catch(error => {
-            console.log(error);
+            res.json(error);
         });
 }
 
@@ -76,8 +81,34 @@ function removeCardFromTable(tablename, userid, uuid, res) {
             res.json(result);
         })
         .catch(error => {
-            console.log(error);
+            res.json(error);
         });
+}
+
+function authenticateUser(userid, token) {
+    return new Promise((resolve, reject) => {
+        let options = {
+            hostname: AUTH_SERVER,
+            path: AUTH_PATH,
+            port: 443,
+            method: 'GET',
+            headers: {Authorization: `Bearer ${token}`}
+        };
+        let auth_req = https.request(options, (responseFromAuthServer) => {
+            responseFromAuthServer.on('data', userDataResponse => {
+                let userData = JSON.parse(userDataResponse);
+                if (userData.id === userid) {
+                    resolve();
+                } else {
+                    reject(new Error(AUTH_FAILED_MESSAGE));
+                }
+            })
+        });
+        auth_req.on('error', (err => {
+            reject(new Error(AUTH_FAILED_MESSAGE));
+        }));
+        auth_req.end();
+    });
 }
 
 let httpsServer = https.createServer(credentials, app);
@@ -90,59 +121,104 @@ app.use(function (req, res, next) {
 
 app.post('/getBlocked', (req, res, next) => {
     let userid = req.body.userid;
-    getAllFromTable(BLOCKED_TABLE, userid, res)
+    let token = req.body.token;
+    authenticateUser(userid, token)
+        .then(() => {
+            getAllFromTable(BLOCKED_TABLE, userid, res)
+        })
+        .catch((err) => {
+            res.json(err.message);
+        });
 });
 
 app.post('/getLiked', (req, res, next) => {
     let userid = req.body.userid;
-    getAllFromTable(LIKED_TABLE, userid, res);
+    let token = req.body.token;
+    authenticateUser(userid, token)
+        .then(() => {
+            getAllFromTable(LIKED_TABLE, userid, res);
+        })
+        .catch((err) => {
+            res.json(err);
+        });
 });
 
 app.post('/addCardToLiked', (req, res, next) => {
     let userid = req.body.userid;
+    let token = req.body.token;
     let uuid = req.body.uuid;
-    putCardInTable(LIKED_TABLE, userid, uuid, res);
+    authenticateUser(userid, token)
+        .then(() => {
+            putCardInTable(LIKED_TABLE, userid, uuid, res);
+        })
+        .catch((err) => {
+            res.json(err.message);
+        });
 });
 
 app.post('/addCardToBlocked', (req, res, next) => {
     let userid = req.body.userid;
+    let token = req.body.token;
     let uuid = req.body.uuid;
-    putCardInTable(BLOCKED_TABLE, userid, uuid, res);
-
+    authenticateUser(userid, token)
+        .then(() => {
+            putCardInTable(BLOCKED_TABLE, userid, uuid, res);
+        })
+        .catch((err) => {
+            res.json(err.message);
+        });
 });
 
 app.post('/removeCardFromLiked', (req, res, next) => {
     let userid = req.body.userid;
+    let token = req.body.token;
     let uuid = req.body.uuid;
-    removeCardFromTable(LIKED_TABLE, userid, uuid, res);
+    authenticateUser(userid, token)
+        .then(() => {
+            removeCardFromTable(LIKED_TABLE, userid, uuid, res);
+        })
+        .catch((err) => {
+            res.json(err.message);
+        });
 });
 
 app.post('/removeCardFromBlocked', (req, res, next) => {
     let userid = req.body.userid;
+    let token = req.body.token;
     let uuid = req.body.uuid;
-    removeCardFromTable(BLOCKED_TABLE, userid, uuid, res);
+    authenticateUser(userid, token)
+        .then(() => {
+            removeCardFromTable(BLOCKED_TABLE, userid, uuid, res);
+        })
+        .catch((err) => {
+            res.json(err.message);
+        });
 });
 
 app.post('/getUserCardStatus', (req, res, next) => {
     let userid = req.body.userid;
+    let token = req.body.token;
     let uuid = req.body.uuid;
-
-    let existsInLikedParams = {
-        TableName: LIKED_TABLE,
-        KeyConditionExpression: "userid = :userid and #uuid = :uuid",
-        ExpressionAttributeValues: {":userid": {'S': userid}, ':uuid': {'S': uuid}},
-        ExpressionAttributeNames: {"#uuid": "uuid"}
-    };
-    let existsInBlockedParams = {
-        TableName: BLOCKED_TABLE,
-        KeyConditionExpression: "userid = :userid and #uuid = :uuid",
-        ExpressionAttributeValues: {":userid": {'S': userid}, ':uuid': {'S': uuid}},
-        ExpressionAttributeNames: {"#uuid": "uuid"}
-    };
-    Promise.all([db.query(existsInLikedParams).promise(), db.query(existsInBlockedParams).promise()])
-        .then(([resLiked, resBlocked]) => {
-            res.json({liked: resLiked.Count > 0, blocked: resBlocked.Count > 0});
-        });
+    authenticateUser(userid, token).then(() => {
+        let existsInLikedParams = {
+            TableName: LIKED_TABLE,
+            KeyConditionExpression: "userid = :userid and #uuid = :uuid",
+            ExpressionAttributeValues: {":userid": {'S': userid}, ':uuid': {'S': uuid}},
+            ExpressionAttributeNames: {"#uuid": "uuid"}
+        };
+        let existsInBlockedParams = {
+            TableName: BLOCKED_TABLE,
+            KeyConditionExpression: "userid = :userid and #uuid = :uuid",
+            ExpressionAttributeValues: {":userid": {'S': userid}, ':uuid': {'S': uuid}},
+            ExpressionAttributeNames: {"#uuid": "uuid"}
+        };
+        Promise.all([db.query(existsInLikedParams).promise(), db.query(existsInBlockedParams).promise()])
+            .then(([resLiked, resBlocked]) => {
+                res.json({liked: resLiked.Count > 0, blocked: resBlocked.Count > 0});
+            });
+    }).catch((err) => {
+        res.json(err.message);
+    });
 });
 
 app.post('/searchForCard', (req, res, next) => {
@@ -151,21 +227,8 @@ app.post('/searchForCard', (req, res, next) => {
         res.json({results: [[]], autocomplete: {}});
         return;
     }
-    let userid = req.body.userid;
     let pagesize = req.body.pagesize;
-    let likedParams = queryAllForUserParams(LIKED_TABLE, userid);
-    let blockedParams = queryAllForUserParams(BLOCKED_TABLE, userid);
     let taken = new Set();
-    let liked_promise = db.query(likedParams).promise();
-    let blocked_promise = db.query(blockedParams).promise();
-    Promise.all([liked_promise, blocked_promise]).then(([res1, res2]) => {
-        res1.Items.forEach(item => {
-            taken.add(item.uuid);
-        });
-        res2.Items.forEach(item => {
-            taken.add(item.uuid);
-        });
-    });
     let results = [];
     for (let index in cards) {
         let card = cards[index];
@@ -194,6 +257,7 @@ app.post('/searchForCard', (req, res, next) => {
 
 app.post("/randomCard", (req, res, next) => {
     let userid = req.body.userid;
+    let token = req.body.token;
     let uuid = cards[randomInt(0, cards.length - 1)].id;
     let filterSettings = req.body.filter;
     let exclusive = undefined;
@@ -214,16 +278,28 @@ app.post("/randomCard", (req, res, next) => {
     }
     let likedParams = queryAllForUserParams(LIKED_TABLE, userid);
     let blockedParams = queryAllForUserParams(BLOCKED_TABLE, userid);
-    let liked_promise, blocked_promise;
-    if (userid) {
-        liked_promise = db.query(likedParams).promise();
-        blocked_promise = db.query(blockedParams).promise();
-    } else {
-        liked_promise = {Items:[]};
-        blocked_promise = {Items:[]};
+    let liked_promise = new Promise((resolve, reject) => {
+        resolve({Items: []})
+    });
+    let blocked_promise = new Promise((resolve, reject) => {
+        resolve({Items: []})
+    });
+    let authentication = new Promise((resolve, reject) => {
+        resolve()
+    });
+    if (userid && token) {
+        authentication = new Promise((resolve, reject) => {
+            authenticateUser(userid, token).then(() => {
+                liked_promise = db.query(likedParams).promise();
+                blocked_promise = db.query(blockedParams).promise();
+
+            }).finally(() => {
+                resolve()
+            });
+        });
     }
 
-    Promise.all([liked_promise, blocked_promise]).then(([res1, res2]) => {
+    Promise.all([liked_promise, blocked_promise, authentication]).then(([res1, res2]) => {
         let taken = new Set();
         res1.Items.forEach(item => {
             taken.add(item.uuid.S);
@@ -265,9 +341,9 @@ app.post("/randomCard", (req, res, next) => {
             }
         }
         res.json(cards[uuidToIndex[uuid]]);
-    })
-    ;
-})
-;
+    }).catch((err) => {
+        res.json({status: 401});
+    });
+});
 
 httpsServer.listen(443, () => console.log('listening'));
