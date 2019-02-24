@@ -19,7 +19,16 @@ let fs = require('fs');
 let cards = require("./scryfall-default-cards");
 let uuidToIndex = {};
 let cardsContainingColor = {"R": new Set(), "U": new Set(), "G": new Set(), "B": new Set(), "W": new Set()};
+let removedCtr = 0;
 for (let i = 0; i < cards.length; i++) {
+    let card = cards[i];
+    if (card.lang !== "en" || card.type_line.includes('Basic Land') || !card.image_uris ) {
+        cards.splice(i, 1);
+        i--;
+        removedCtr++;
+        continue;
+    }
+
     uuidToIndex[cards[i].id] = i;
     let colors = cards[i].colors;
     if (colors) {
@@ -28,6 +37,7 @@ for (let i = 0; i < cards.length; i++) {
         });
     }
 }
+console.log(`removed ${removedCtr} from dataset`);
 
 let privateKey = fs.readFileSync('./cert/privkey.pem', 'utf8');
 let cert = fs.readFileSync('./cert/fullchain.pem', 'utf8');
