@@ -21,11 +21,12 @@ let uuidToIndex = {};
 let cardsContainingColor = {"R": new Set(), "U": new Set(), "G": new Set(), "B": new Set(), "W": new Set()};
 let formatsContainingCards = {};
 let lands = new Set();
+let commanders = new Set();
 let cardTypes = {};
 let removedCtr = 0;
 for (let i = 0; i < cards.length; i++) {
     let card = cards[i];
-    if (card.lang !== "en" || card.type_line.includes('Basic Land') || !card.image_uris) {
+    if (card.lang !== "en" || !card.image_uris || card.type_line.includes('Basic Land')) {
         cards.splice(i, 1);
         i--;
         removedCtr++;
@@ -41,10 +42,10 @@ for (let i = 0; i < cards.length; i++) {
     }
     let legalities = card.legalities;
     for (let format in legalities) {
+        if (!formatsContainingCards[format]) {
+            formatsContainingCards[format] = new Set();
+        }
         if (legalities[format] === 'legal') {
-            if (!formatsContainingCards[format]) {
-                formatsContainingCards[format] = new Set();
-            }
             formatsContainingCards[format].add(card.id)
         }
     }
@@ -56,6 +57,13 @@ for (let i = 0; i < cards.length; i++) {
     cardTypes[type].add(card.id);
     if (type.toLowerCase().includes('land')) {
         lands.add(card.id);
+    }
+    if (formatsContainingCards['commander'].has(card.id)) {
+        if (type.toLowerCase() === 'legendarycreature') {
+            commanders.add(card.id);
+        } else if (type.toLowerCase().includes('planeswalker') && card.oracle_text.includes(`${card.name} can be your commander`)) {
+            commanders.add(card.id);
+        }
     }
 }
 console.log(`removed ${removedCtr} from dataset`);
@@ -295,6 +303,7 @@ app.post("/randomCard", (req, res, next) => {
     let colorFlags = filterSettings.colorFlags;
     let formatFlags = filterSettings.formatFlags;
     let allowLands = filterSettings.allowLands;
+    let commandersOnly = filterSettings.commandersOnly;
 
     let likedParams = queryAllForUserParams(LIKED_TABLE, userid);
     let blockedParams = queryAllForUserParams(BLOCKED_TABLE, userid);
@@ -347,6 +356,9 @@ app.post("/randomCard", (req, res, next) => {
                     }
                 }
                 if (!allowLands && lands.has(card.id)) {
+                    excluded.add(card.id);
+                }
+                if (commandersOnly && !commanders.has(card.id)) {
                     excluded.add(card.id);
                 }
             });
