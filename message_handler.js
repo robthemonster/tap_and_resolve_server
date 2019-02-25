@@ -19,7 +19,9 @@ let fs = require('fs');
 let cards = require("./scryfall-default-cards");
 let uuidToIndex = {};
 let cardsContainingColor = {"R": new Set(), "U": new Set(), "G": new Set(), "B": new Set(), "W": new Set()};
-let formatsContainingCards = {};//{'commander': new Set(), "duel": new Set(), "frontier": new Set(), "future": new Set(), "legacy": new Set(), "modern": new Set(), "oldschool": new Set(), "pauper": new Set(),"penny": new Set(),"standard": new Set(),"vintage": new Set()}
+let formatsContainingCards = {};
+let lands = new Set();
+let cardTypes = {};
 let removedCtr = 0;
 for (let i = 0; i < cards.length; i++) {
     let card = cards[i];
@@ -45,6 +47,15 @@ for (let i = 0; i < cards.length; i++) {
             }
             formatsContainingCards[format].add(card.id)
         }
+    }
+    let type = card.type_line.split("—")[0];
+    type = type.replace(/\s/g, '');
+    if (!cardTypes[type]) {
+        cardTypes[type] = new Set();
+    }
+    cardTypes[type].add(card.id);
+    if (type.toLowerCase().includes('land')) {
+        lands.add(card.id);
     }
 }
 console.log(`removed ${removedCtr} from dataset`);
@@ -279,11 +290,11 @@ app.post("/randomCard", (req, res, next) => {
     let userid = req.body.userid;
     let token = req.body.token;
     let uuid = cards[randomInt(0, cards.length - 1)].id;
-    let filterFlag = false;
     let filterSettings = JSON.parse(req.body.filter);
     let colorExclusive = filterSettings.colorExclusive;
     let colorFlags = filterSettings.colorFlags;
     let formatFlags = filterSettings.formatFlags;
+    let allowLands = filterSettings.allowLands;
 
     let likedParams = queryAllForUserParams(LIKED_TABLE, userid);
     let blockedParams = queryAllForUserParams(BLOCKED_TABLE, userid);
@@ -301,7 +312,6 @@ app.post("/randomCard", (req, res, next) => {
             authenticateUser(userid, token).then(() => {
                 liked_promise = db.query(likedParams).promise();
                 blocked_promise = db.query(blockedParams).promise();
-
             }).finally(() => {
                 resolve()
             });
@@ -335,6 +345,9 @@ app.post("/randomCard", (req, res, next) => {
                     if (formatFlags[format] && !formatsContainingCards[format].has(card.id)) {
                         excluded.add(card.id);
                     }
+                }
+                if (!allowLands && lands.has(card.id)) {
+                    excluded.add(card.id);
                 }
             });
         }
