@@ -19,22 +19,32 @@ let fs = require('fs');
 let cards = require("./scryfall-default-cards");
 let uuidToIndex = {};
 let cardsContainingColor = {"R": new Set(), "U": new Set(), "G": new Set(), "B": new Set(), "W": new Set()};
+let formatsContainingCards = {};//{'commander': new Set(), "duel": new Set(), "frontier": new Set(), "future": new Set(), "legacy": new Set(), "modern": new Set(), "oldschool": new Set(), "pauper": new Set(),"penny": new Set(),"standard": new Set(),"vintage": new Set()}
 let removedCtr = 0;
 for (let i = 0; i < cards.length; i++) {
     let card = cards[i];
-    if (card.lang !== "en" || card.type_line.includes('Basic Land') || !card.image_uris ) {
+    if (card.lang !== "en" || card.type_line.includes('Basic Land') || !card.image_uris) {
         cards.splice(i, 1);
         i--;
         removedCtr++;
         continue;
     }
 
-    uuidToIndex[cards[i].id] = i;
-    let colors = cards[i].colors;
+    uuidToIndex[card.id] = i;
+    let colors = card.colors;
     if (colors) {
         colors.forEach(color => {
-            cardsContainingColor[color].add(cards[i].id);
+            cardsContainingColor[color].add(card.id);
         });
+    }
+    let legalities = card.legalities;
+    for (let format in legalities) {
+        if (legalities[format] === 'legal') {
+            if (!formatsContainingCards[format]) {
+                formatsContainingCards[format] = new Set();
+            }
+            formatsContainingCards[format].add(card.id)
+        }
     }
 }
 console.log(`removed ${removedCtr} from dataset`);
@@ -269,23 +279,12 @@ app.post("/randomCard", (req, res, next) => {
     let userid = req.body.userid;
     let token = req.body.token;
     let uuid = cards[randomInt(0, cards.length - 1)].id;
-    let filterSettings = req.body.filter;
-    let exclusive = undefined;
-    let flags = undefined;
-    if (filterSettings) {
-        filterSettings = JSON.parse(filterSettings);
-        exclusive = filterSettings.exclusive;
-        flags = filterSettings.flags;
-        if (!exclusive) {
-            let noFilter = true;
-            for (let key in flags) {
-                noFilter &= flags[key];
-            }
-            if (noFilter) {
-                filterSettings = false;
-            }
-        }
-    }
+    let filterFlag = false;
+    let filterSettings = JSON.parse(req.body.filter);
+    let colorExclusive = filterSettings.colorExclusive;
+    let colorFlags = filterSettings.colorFlags;
+    let formatFlags = filterSettings.formatFlags;
+
     let likedParams = queryAllForUserParams(LIKED_TABLE, userid);
     let blockedParams = queryAllForUserParams(BLOCKED_TABLE, userid);
     let liked_promise = new Promise((resolve, reject) => {
@@ -310,42 +309,47 @@ app.post("/randomCard", (req, res, next) => {
     }
 
     Promise.all([liked_promise, blocked_promise, authentication]).then(([res1, res2]) => {
-        let taken = new Set();
+        let excluded = new Set();
         res1.Items.forEach(item => {
-            taken.add(item.uuid.S);
+            excluded.add(item.uuid.S);
         });
         res2.Items.forEach(item => {
-            taken.add(item.uuid.S);
+            excluded.add(item.uuid.S);
         });
         if (filterSettings) {
             cards.forEach(card => {
-                for (let color in flags) {
-                    if (flags[color]) {
-                        if (exclusive) {
+                for (let color in colorFlags) {
+                    if (colorFlags[color]) {
+                        if (colorExclusive) {
                             if (!cardsContainingColor[color].has(card.id)) {
-                                taken.add(card.id);
+                                excluded.add(card.id);
                             }
                         }
                     } else {
                         if (cardsContainingColor[color].has(card.id)) {
-                            taken.add(card.id);
+                            excluded.add(card.id);
                         }
+                    }
+                }
+                for (let format in formatFlags) {
+                    if (formatFlags[format] && !formatsContainingCards[format].has(card.id)) {
+                        excluded.add(card.id);
                     }
                 }
             });
         }
-        if (taken.has(uuid)) {
-            if (taken.size >= cards.length / 2) {
+        if (excluded.has(uuid)) {
+            if (excluded.size >= cards.length / 2) {
                 let rand = [];
                 for (let i = 0; i < cards.length; i++) {
                     let candidateUuid = cards[i].id;
-                    if (!taken.has(candidateUuid)) {
+                    if (!excluded.has(candidateUuid)) {
                         rand.push(candidateUuid);
                     }
                 }
                 uuid = rand[randomInt(0, rand.length - 1)];
             } else {
-                while (taken.has(uuid)) {
+                while (excluded.has(uuid)) {
                     uuid = cards[randomInt(0, cards.length - 1)].id;
                 }
             }
