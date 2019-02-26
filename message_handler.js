@@ -58,8 +58,8 @@ for (let i = 0; i < cards.length; i++) {
     if (type.toLowerCase().includes('land')) {
         lands.add(card.id);
     }
-    if (formatsContainingCards['commander'].has(card.id)) {
-        if (type.toLowerCase() === 'legendarycreature') {
+    if (formatsContainingCards['commander'].has(card.id) && card.layout !== 'meld') {
+        if (type.toLowerCase().includes('legendary') && type.toLowerCase().includes('creature')) {
             commanders.add(card.id);
         } else if (type.toLowerCase().includes('planeswalker') && card.oracle_text.includes(`${card.name} can be your commander`)) {
             commanders.add(card.id);
