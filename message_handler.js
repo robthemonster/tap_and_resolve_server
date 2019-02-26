@@ -297,7 +297,7 @@ app.post('/searchForCard', (req, res, next) => {
 app.post("/randomCard", (req, res, next) => {
     let userid = req.body.userid;
     let token = req.body.token;
-    let uuid = cards[randomInt(0, cards.length - 1)].id;
+    let uuid = cards[randomInt(0, cards.length)].id;
     let filterSettings = JSON.parse(req.body.filter);
     let colorExclusive = filterSettings.colorExclusive;
     let colorFlags = filterSettings.colorFlags;
@@ -372,10 +372,10 @@ app.post("/randomCard", (req, res, next) => {
                         rand.push(candidateUuid);
                     }
                 }
-                uuid = rand[randomInt(0, rand.length - 1)];
+                uuid = rand[randomInt(0, rand.length)];
             } else {
                 while (excluded.has(uuid)) {
-                    uuid = cards[randomInt(0, cards.length - 1)].id;
+                    uuid = cards[randomInt(0, cards.length)].id;
                 }
             }
         }
