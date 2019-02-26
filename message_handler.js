@@ -326,63 +326,71 @@ app.post("/randomCard", (req, res, next) => {
             });
         });
     }
-
-    Promise.all([liked_promise, blocked_promise, authentication]).then(([res1, res2]) => {
-        let excluded = new Set();
-        res1.Items.forEach(item => {
-            excluded.add(item.uuid.S);
-        });
-        res2.Items.forEach(item => {
-            excluded.add(item.uuid.S);
-        });
-        if (filterSettings) {
-            cards.forEach(card => {
-                for (let color in colorFlags) {
-                    if (colorFlags[color]) {
-                        if (colorExclusive) {
-                            if (!cardsContainingColor[color].has(card.id)) {
+    authentication.then(() => {
+        Promise.all([liked_promise, blocked_promise]).then(([res1, res2]) => {
+            let excluded = new Set();
+            res1.Items.forEach(item => {
+                excluded.add(item.uuid.S);
+            });
+            res2.Items.forEach(item => {
+                excluded.add(item.uuid.S);
+            });
+            if (filterSettings) {
+                cards.forEach(card => {
+                    for (let color in colorFlags) {
+                        if (colorFlags[color]) {
+                            if (colorExclusive) {
+                                if (!cardsContainingColor[color].has(card.id)) {
+                                    excluded.add(card.id);
+                                }
+                            }
+                        } else {
+                            if (cardsContainingColor[color].has(card.id)) {
                                 excluded.add(card.id);
                             }
                         }
-                    } else {
-                        if (cardsContainingColor[color].has(card.id)) {
+                    }
+                    for (let format in formatFlags) {
+                        if (formatFlags[format] && !formatsContainingCards[format].has(card.id)) {
                             excluded.add(card.id);
                         }
                     }
-                }
-                for (let format in formatFlags) {
-                    if (formatFlags[format] && !formatsContainingCards[format].has(card.id)) {
+                    if (!allowLands && lands.has(card.id)) {
                         excluded.add(card.id);
                     }
-                }
-                if (!allowLands && lands.has(card.id)) {
-                    excluded.add(card.id);
-                }
-                if (commandersOnly && !commanders.has(card.id)) {
-                    excluded.add(card.id);
-                }
-            });
-        }
-        if (excluded.has(uuid)) {
-            if (excluded.size >= cards.length / 2) {
-                let rand = [];
-                for (let i = 0; i < cards.length; i++) {
-                    let candidateUuid = cards[i].id;
-                    if (!excluded.has(candidateUuid)) {
-                        rand.push(candidateUuid);
+                    if (commandersOnly && !commanders.has(card.id)) {
+                        excluded.add(card.id);
+                    }
+                });
+            }
+            if (excluded.has(uuid)) {
+                if (excluded.size >= cards.length / 2) {
+                    let rand = [];
+                    for (let i = 0; i < cards.length; i++) {
+                        let candidateUuid = cards[i].id;
+                        if (!excluded.has(candidateUuid)) {
+                            rand.push(candidateUuid);
+                        }
+                    }
+                    if (rand.length === 0) {
+                        res.json("NO CARDS REMAINING");
+                        return;
+                    }
+                    uuid = rand[randomInt(0, rand.length)];
+                } else {
+                    while (excluded.has(uuid)) {
+                        uuid = cards[randomInt(0, cards.length)].id;
                     }
                 }
-                uuid = rand[randomInt(0, rand.length)];
-            } else {
-                while (excluded.has(uuid)) {
-                    uuid = cards[randomInt(0, cards.length)].id;
-                }
             }
-        }
-        res.json(cards[uuidToIndex[uuid]]);
-    }).catch((err) => {
-        res.json({status: 401});
-    });
+            res.json(cards[uuidToIndex[uuid]]);
+        }).catch((err) => {
+            res.json({status: 401});
+        });
+    })
+        .catch((error) => {
+            res.json(error);
+        });
 });
 
 httpsServer.listen(443, () => console.log('listening'));
