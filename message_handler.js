@@ -1,7 +1,8 @@
 'use strict';
 
 const AUTH_FAILED_MESSAGE = "Failed to authenticate user";
-
+const NO_CARD_REMAINING_MESSAGE = "No cards remaining";
+const DB_WRITE_ERROR_MESSAGE = "Error writing to database";
 
 let dotenv = require('dotenv');
 let AUTH_SERVER = "tapandresolve.tk";
@@ -24,49 +25,6 @@ let lands = new Set();
 let commanders = new Set();
 let cardTypes = {};
 let removedCtr = 0;
-for (let i = 0; i < cards.length; i++) {
-    let card = cards[i];
-    if (card.lang !== "en" || !card.image_uris || card.type_line.includes('Basic Land')) {
-        cards.splice(i, 1);
-        i--;
-        removedCtr++;
-        continue;
-    }
-
-    uuidToIndex[card.id] = i;
-    let colors = card.colors;
-    if (colors) {
-        colors.forEach(color => {
-            cardsContainingColor[color].add(card.id);
-        });
-    }
-    let legalities = card.legalities;
-    for (let format in legalities) {
-        if (!formatsContainingCards[format]) {
-            formatsContainingCards[format] = new Set();
-        }
-        if (legalities[format] === 'legal') {
-            formatsContainingCards[format].add(card.id)
-        }
-    }
-    let type = card.type_line.split("—")[0];
-    type = type.replace(/\s/g, '');
-    if (!cardTypes[type]) {
-        cardTypes[type] = new Set();
-    }
-    cardTypes[type].add(card.id);
-    if (type.toLowerCase().includes('land')) {
-        lands.add(card.id);
-    }
-    if (formatsContainingCards['commander'].has(card.id) && card.layout !== 'meld') {
-        if (type.toLowerCase().includes('legendary') && type.toLowerCase().includes('creature')) {
-            commanders.add(card.id);
-        } else if (type.toLowerCase().includes('planeswalker') && card.oracle_text.includes(`${card.name} can be your commander`)) {
-            commanders.add(card.id);
-        }
-    }
-}
-console.log(`removed ${removedCtr} from dataset`);
 
 let privateKey = fs.readFileSync('./cert/privkey.pem', 'utf8');
 let cert = fs.readFileSync('./cert/fullchain.pem', 'utf8');
@@ -104,24 +62,12 @@ function getAllFromTable(tablename, userid, res) {
     });
 }
 
-function putCardInTable(tablename, userid, uuid, res) {
-    db.putItem({TableName: tablename, Item: {'userid': {'S': userid}, 'uuid': {'S': uuid}}}).promise()
-        .then(result => {
-            res.json(result);
-        })
-        .catch(error => {
-            res.json(error);
-        });
+function putCardInTable(tablename, userid, uuid) {
+    return db.putItem({TableName: tablename, Item: {'userid': {'S': userid}, 'uuid': {'S': uuid}}}).promise();
 }
 
-function removeCardFromTable(tablename, userid, uuid, res) {
-    db.deleteItem({TableName: tablename, Key: {'userid': {'S': userid}, 'uuid': {'S': uuid}}}).promise()
-        .then(result => {
-            res.json(result);
-        })
-        .catch(error => {
-            res.json(error);
-        });
+function removeCardFromTable(tablename, userid, uuid) {
+    return db.deleteItem({TableName: tablename, Key: {'userid': {'S': userid}, 'uuid': {'S': uuid}}}).promise();
 }
 
 function authenticateUser(userid, token) {
@@ -150,7 +96,86 @@ function authenticateUser(userid, token) {
     });
 }
 
-let httpsServer = https.createServer(credentials, app);
+async function preprocess() {
+
+    for (let i = 0; i < cards.length; i++) {
+        cards[i].likedCount = 0;
+        cards[i].dislikedCount = 0;
+        let card = cards[i];
+        if (card.lang !== "en" || !card.image_uris || card.type_line.includes('Basic Land')) {
+            cards.splice(i, 1);
+            i--;
+            removedCtr++;
+            continue;
+        }
+        uuidToIndex[card.id] = i;
+        let colors = card.colors;
+        if (colors) {
+            colors.forEach(color => {
+                cardsContainingColor[color].add(card.id);
+            });
+        }
+        let legalities = card.legalities;
+        for (let format in legalities) {
+            if (!formatsContainingCards[format]) {
+                formatsContainingCards[format] = new Set();
+            }
+            if (legalities[format] === 'legal') {
+                formatsContainingCards[format].add(card.id)
+            }
+        }
+        let type = card.type_line.split("—")[0];
+        type = type.replace(/\s/g, '');
+        if (!cardTypes[type]) {
+            cardTypes[type] = new Set();
+        }
+        cardTypes[type].add(card.id);
+        if (type.toLowerCase().includes('land')) {
+            lands.add(card.id);
+        }
+        if (formatsContainingCards['commander'].has(card.id) && card.layout !== 'meld') {
+            if (type.toLowerCase().includes('legendary') && type.toLowerCase().includes('creature')) {
+                commanders.add(card.id);
+            } else if (type.toLowerCase().includes('planeswalker') && card.oracle_text && card.oracle_text.includes(`${card.name} can be your commander`)) {
+                commanders.add(card.id);
+            }
+        }
+
+    }
+    console.log(`removed ${removedCtr} from dataset`);
+    await new Promise((resolve, reject) => {
+        db.scan({TableName: LIKED_TABLE}, (error, data) => {
+            if (error) {
+                console.log(error);
+                reject();
+            }
+            data.Items.forEach(item => {
+                if (!cards[uuidToIndex[item.uuid.S]]) {
+                    console.log(item.uuid.S + " not found in cards array");
+                } else {
+                    cards[uuidToIndex[item.uuid.S]].likedCount++;
+                }
+            });
+            resolve();
+        });
+    });
+    await new Promise((resolve, reject) => {
+        db.scan({TableName: BLOCKED_TABLE}, (error, data) => {
+            if (error) {
+                console.log(error);
+                reject();
+            }
+            data.Items.forEach(item => {
+                if (!cards[uuidToIndex[item.uuid.S]]) {
+                    console.log(item.uuid.S + " not found in cards array");
+                } else {
+                    cards[uuidToIndex[item.uuid.S]].dislikedCount++;
+                }
+            });
+            resolve();
+        });
+    });
+}
 
 app.use(function (req, res, next) {
     res.header("Access-Control-Allow-Origin", "*");
@@ -165,8 +190,8 @@ app.post('/getBlocked', (req, res, next) => {
         .then(() => {
             getAllFromTable(BLOCKED_TABLE, userid, res)
         })
-        .catch((err) => {
-            res.json(err.message);
+        .catch(() => {
+            res.status(401).send({message: AUTH_FAILED_MESSAGE});
         });
 });
 
@@ -177,8 +202,8 @@ app.post('/getLiked', (req, res, next) => {
         .then(() => {
             getAllFromTable(LIKED_TABLE, userid, res);
         })
-        .catch((err) => {
-            res.json(err);
+        .catch(() => {
+            res.status(401).send({message: AUTH_FAILED_MESSAGE});
         });
 });
 
@@ -188,10 +213,17 @@ app.post('/addCardToLiked', (req, res, next) => {
     let uuid = req.body.uuid;
     authenticateUser(userid, token)
         .then(() => {
-            putCardInTable(LIKED_TABLE, userid, uuid, res);
+            putCardInTable(LIKED_TABLE, userid, uuid)
+                .then(() => {
+                    cards[uuidToIndex[uuid]].likedCount++;
+                    res.json(cards[uuidToIndex[uuid]]);
+                })
+                .catch(() => {
+                    res.status(500).send({message: DB_WRITE_ERROR_MESSAGE});
+                });
         })
         .catch((err) => {
-            res.json(err.message);
+            res.status(401).send({message: AUTH_FAILED_MESSAGE});
         });
 });
 
@@ -201,10 +233,17 @@ app.post('/addCardToBlocked', (req, res, next) => {
     let uuid = req.body.uuid;
     authenticateUser(userid, token)
         .then(() => {
-            putCardInTable(BLOCKED_TABLE, userid, uuid, res);
+            putCardInTable(BLOCKED_TABLE, userid, uuid)
+                .then(() => {
+                    cards[uuidToIndex[uuid]].dislikedCount++;
+                    res.json(cards[uuidToIndex[uuid]]);
+                })
+                .catch(() => {
+                    res.status(500).send({message: DB_WRITE_ERROR_MESSAGE});
+                });
         })
         .catch((err) => {
-            res.json(err.message);
+            res.status(401).send({message: AUTH_FAILED_MESSAGE});
         });
 });
 
@@ -214,10 +253,17 @@ app.post('/removeCardFromLiked', (req, res, next) => {
     let uuid = req.body.uuid;
     authenticateUser(userid, token)
         .then(() => {
-            removeCardFromTable(LIKED_TABLE, userid, uuid, res);
+            removeCardFromTable(LIKED_TABLE, userid, uuid)
+                .then(() => {
+                    cards[uuidToIndex[uuid]].likedCount--;
+                    res.json(cards[uuidToIndex[uuid]]);
+                })
+                .catch(() => {
+                    res.status(500).send({message: DB_WRITE_ERROR_MESSAGE});
+                });
         })
         .catch((err) => {
-            res.json(err.message);
+            res.status(401).send({message: AUTH_FAILED_MESSAGE});
         });
 });
 
@@ -227,10 +273,17 @@ app.post('/removeCardFromBlocked', (req, res, next) => {
     let uuid = req.body.uuid;
     authenticateUser(userid, token)
         .then(() => {
-            removeCardFromTable(BLOCKED_TABLE, userid, uuid, res);
+            removeCardFromTable(BLOCKED_TABLE, userid, uuid)
+                .then(() => {
+                    cards[uuidToIndex[uuid]].dislikedCount--;
+                    res.json(cards[uuidToIndex[uuid]]);
+                })
+                .catch(() => {
+                    res.status(500).send({message: DB_WRITE_ERROR_MESSAGE});
+                });
         })
         .catch((err) => {
-            res.json(err.message);
+            res.status(401).send({message: AUTH_FAILED_MESSAGE});
         });
 });
 
@@ -255,8 +308,8 @@ app.post('/getUserCardStatus', (req, res, next) => {
             .then(([resLiked, resBlocked]) => {
                 res.json({liked: resLiked.Count > 0, blocked: resBlocked.Count > 0});
             });
-    }).catch((err) => {
-        res.json(err.message);
+    }).catch(() => {
+        res.status(401).send({message: AUTH_FAILED_MESSAGE});
     });
 });
 
@@ -321,8 +374,9 @@ app.post("/randomCard", (req, res, next) => {
             authenticateUser(userid, token).then(() => {
                 liked_promise = db.query(likedParams).promise();
                 blocked_promise = db.query(blockedParams).promise();
-            }).finally(() => {
-                resolve()
+                resolve();
+            }).catch((error) => {
+                reject(error)
             });
         });
     }
@@ -373,7 +427,7 @@ app.post("/randomCard", (req, res, next) => {
                         }
                     }
                     if (rand.length === 0) {
-                        res.json("NO CARDS REMAINING");
+                        res.status(500).send({message: NO_CARD_REMAINING_MESSAGE});
                         return;
                     }
                     uuid = rand[randomInt(0, rand.length)];
@@ -387,10 +441,12 @@ app.post("/randomCard", (req, res, next) => {
         }).catch((err) => {
             res.json({status: 401});
         });
-    })
-        .catch((error) => {
-            res.json(error);
-        });
+    }).catch(() => {
+        res.status(401).send({message: AUTH_FAILED_MESSAGE});
+    });
 });
 
-httpsServer.listen(443, () => console.log('listening'));
+preprocess().then(() => {
+    const httpsServer = https.createServer(credentials, app);
+    httpsServer.listen(443, () => console.log('listening'));
+});
