@@ -16,6 +16,15 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({extended: true}));
 let https = require('https');
 
+const SORTERS = {
+    'TOP': (b, a) => {
+        return (a.likedCount - a.dislikedCount) - (b.likedCount - b.dislikedCount)
+    },
+    'CONTROVERSIAL': (b, a) => {
+        return ((a.likedCount + a.dislikedCount) / Math.max(Math.abs(a.likedCount - a.dislikedCount), 1))
+            - ((b.likedCount + b.dislikedCount) / Math.max(Math.abs(b.likedCount - b.dislikedCount), 1));
+    }
+};
 let fs = require('fs');
 let cards = require("./scryfall-default-cards");
 let uuidToIndex = {};
@@ -181,6 +190,17 @@ app.use(function (req, res, next) {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
     next();
+});
+
+app.post('/getTopCards', (req, res, next) => {
+    let sort = req.body.sort;
+    let sorted = cards.concat().sort(SORTERS[sort]).splice(0, 100);
+    res.json(sorted);
+});
+
+app.post('/handleIdentityEvent', (req, res, next) => {
+    let event = req.body.event;
+    console.log(event);
 });
 
 app.post('/getBlocked', (req, res, next) => {
