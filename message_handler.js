@@ -334,12 +334,13 @@ app.post('/getUserCardStatus', (req, res, next) => {
 });
 
 app.post('/searchForCard', (req, res, next) => {
-    let searchString = req.body.searchString.toLowerCase();
-    if (searchString.length < 3) {
-        res.json({results: [[]], autocomplete: {}});
+    if (!req.body.searchString || req.body.searchString.length < 3) {
+        res.json({cards: [], numPages: 0});
         return;
     }
-    let pagesize = req.body.pagesize;
+    let searchString = req.body.searchString.toLowerCase();
+    let pageNumber = req.body.pageNumber;
+    let pageSize = req.body.pageSize;
     let taken = new Set();
     let results = [];
     for (let index in cards) {
@@ -351,20 +352,12 @@ app.post('/searchForCard', (req, res, next) => {
     results.sort((a, b) => {
         return a.name.toLowerCase().indexOf(searchString) - b.name.toLowerCase().indexOf(searchString)
     });
-    let pageCtr = 0;
-    let paginatedResults = [[]];
-    for (let i = 0; i < results.length; i++) {
-        if (paginatedResults[pageCtr].length >= pagesize) {
-            pageCtr++;
-            paginatedResults[pageCtr] = [];
-        }
-        paginatedResults[pageCtr].push(results[i]);
+    let page = [];
+    for (let i = pageNumber * pageSize; i < (pageNumber + 1) * pageSize && i < results.length; i++) {
+
+        page.push(results[i]);
     }
-    let autocomplete = {};
-    for (let i = 0; i < results.length; i++) {
-        autocomplete[results[i].name] = (results[i].image_uris) ? results[i].image_uris.small : null;
-    }
-    res.json({results: paginatedResults, autocomplete: autocomplete});
+    res.json({cards: page, numPages: Math.ceil(results.length / pageSize)});
 });
 
 app.post("/randomCard", (req, res, next) => {
