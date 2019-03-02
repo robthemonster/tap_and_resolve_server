@@ -17,12 +17,15 @@ app.use(bodyParser.urlencoded({extended: true}));
 let https = require('https');
 
 const SORTERS = {
-    'TOP': (b, a) => {
-        return (a.likedCount - a.dislikedCount) - (b.likedCount - b.dislikedCount)
+    'TOP': (a, b) => {
+        return (b.likedCount - b.dislikedCount) - (a.likedCount - a.dislikedCount)
     },
-    'CONTROVERSIAL': (b, a) => {
-        return ((a.likedCount + a.dislikedCount) / Math.max(Math.abs(a.likedCount - a.dislikedCount), 1))
-            - ((b.likedCount + b.dislikedCount) / Math.max(Math.abs(b.likedCount - b.dislikedCount), 1));
+    'CONTROVERSIAL': (a, b) => {
+        return ((b.likedCount + b.dislikedCount) / Math.max(Math.abs(b.likedCount - b.dislikedCount), 1))
+            - ((a.likedCount + a.dislikedCount) / Math.max(Math.abs(a.likedCount - a.dislikedCount), 1));
+    },
+    'WORST': (a, b) => {
+        return SORTERS['TOP'](b, a);
     }
 };
 let fs = require('fs');
