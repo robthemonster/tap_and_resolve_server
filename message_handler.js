@@ -37,6 +37,7 @@ let lands = new Set();
 let commanders = new Set();
 let cardTypes = {};
 let removedCtr = 0;
+let setContains = {};
 
 let privateKey = fs.readFileSync('./cert/privkey.pem', 'utf8');
 let cert = fs.readFileSync('./cert/fullchain.pem', 'utf8');
@@ -120,6 +121,10 @@ async function preprocess() {
             removedCtr++;
             continue;
         }
+        if (!setContains[card.set]) {
+            setContains[card.set] = new Set();
+        }
+        setContains[card.set].add(card.id);
         uuidToIndex[card.id] = i;
         let colors = card.colors;
         if (colors) {
@@ -443,7 +448,12 @@ app.post("/randomCard", (req, res, next) => {
                         }
                     }
                     if (rand.length === 0) {
-                        res.status(500).send({message: NO_CARD_REMAINING_MESSAGE});
+                        let no_card = {
+                            name: "",
+                            oracle_text: "",
+                            image_uris: {border_crop: "../assets/no_cards_remaining.png"}
+                        };
+                        res.json(no_card);
                         return;
                     }
                     uuid = rand[randomInt(0, rand.length)];
@@ -455,7 +465,7 @@ app.post("/randomCard", (req, res, next) => {
             }
             res.json(cards[uuidToIndex[uuid]]);
         }).catch((err) => {
-            res.json({status: 401});
+            res.status(401);
         });
     }).catch(() => {
         res.status(401).send({message: AUTH_FAILED_MESSAGE});
