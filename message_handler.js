@@ -460,11 +460,19 @@ app.post("/randomCard", (req, res, next) => {
                 excluded.add(item.uuid.S);
             });
             if (filterSettings) {
-                for (let color in colorFlags) {
-                    if (colorFlags[color] && colorExclusive) {
-                        excluded = setUnion(excluded, allMinusColor[color]);
-                    } else {
-                        excluded = setUnion(excluded, cardsContainingColor[color]);
+                if (colorExclusive) {
+                    for (let color in colorFlags) {
+                        if (colorFlags[color]) {
+                            excluded = setUnion(excluded, allMinusColor[color]);
+                        } else {
+                            excluded = setUnion(excluded, cardsContainingColor[color]);
+                        }
+                    }
+                } else {
+                    for (let color in colorFlags) {
+                        if (!colorFlags[color]) {
+                            excluded = setUnion(excluded, cardsContainingColor[color]);
+                        }
                     }
                 }
                 for (let format in formatFlags) {
