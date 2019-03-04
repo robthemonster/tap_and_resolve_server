@@ -38,6 +38,12 @@ let commanders = new Set();
 let cardTypes = {};
 let removedCtr = 0;
 let setContains = {};
+let sets = [];
+let allIds = new Set();
+let allMinusColor = new Set();
+let allMinusFormat = new Set();
+let allMinusCommanders = new Set();
+
 
 let privateKey = fs.readFileSync('./cert/privkey.pem', 'utf8');
 let cert = fs.readFileSync('./cert/fullchain.pem', 'utf8');
@@ -48,6 +54,32 @@ aws.config.update({region: 'us-east-2', accessKeyId: process.env.AWS_API_ID, sec
 let db = new aws.DynamoDB({apiVersion: '2019-02-16'});
 const LIKED_TABLE = "cards_liked";
 const BLOCKED_TABLE = "cards_blocked";
+
+function setDifference(a, b) {
+    let diff = new Set(a);
+    for (let el of b) {
+        diff.delete(el);
+    }
+    return diff;
+}
+
+function setUnion(a, b) {
+    let union = new Set(a);
+    for (let el of b) {
+        union.add(el);
+    }
+    return union;
+}
+
+function setIntersection(a, b) {
+    let intersection = new Set();
+    for (let el of a) {
+        if (b.has(el)) {
+            intersection.add(el);
+        }
+    }
+    return intersection;
+}
 
 function randomInt(min, max) {
     return min + Math.floor(Math.random() * (max - min));
@@ -121,8 +153,10 @@ async function preprocess() {
             removedCtr++;
             continue;
         }
+        allIds.add(card.id);
         if (!setContains[card.set]) {
             setContains[card.set] = new Set();
+            sets.push({code: card.set, name: card.set_name, release: card.released_at});
         }
         setContains[card.set].add(card.id);
         uuidToIndex[card.id] = i;
@@ -159,6 +193,16 @@ async function preprocess() {
         }
 
     }
+    sets.sort((a, b) => {
+        return new Date(b.release) - new Date(a.release);
+    });
+    for (let color in cardsContainingColor) {
+        allMinusColor[color] = setDifference(allIds, cardsContainingColor[color]);
+    }
+    for (let format in formatsContainingCards) {
+        allMinusFormat[format] = setDifference(allIds, formatsContainingCards[format]);
+    }
+    allMinusCommanders = setDifference(allIds, commanders);
     console.log(`removed ${removedCtr} from dataset`);
     await new Promise((resolve, reject) => {
         db.scan({TableName: LIKED_TABLE}, (error, data) => {
@@ -198,6 +242,10 @@ app.use(function (req, res, next) {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
     next();
+});
+
+app.post('/getSetCodes', (req, res, next) => {
+    res.json(sets);
 });
 
 app.post('/getTopCards', (req, res, next) => {
@@ -378,6 +426,7 @@ app.post("/randomCard", (req, res, next) => {
     let formatFlags = filterSettings.formatFlags;
     let allowLands = filterSettings.allowLands;
     let commandersOnly = filterSettings.commandersOnly;
+    let excludedSets = filterSettings.excludedSets;
 
     let likedParams = queryAllForUserParams(LIKED_TABLE, userid);
     let blockedParams = queryAllForUserParams(BLOCKED_TABLE, userid);
@@ -411,32 +460,38 @@ app.post("/randomCard", (req, res, next) => {
                 excluded.add(item.uuid.S);
             });
             if (filterSettings) {
-                cards.forEach(card => {
-                    for (let color in colorFlags) {
-                        if (colorFlags[color]) {
-                            if (colorExclusive) {
-                                if (!cardsContainingColor[color].has(card.id)) {
-                                    excluded.add(card.id);
-                                }
-                            }
-                        } else {
-                            if (cardsContainingColor[color].has(card.id)) {
-                                excluded.add(card.id);
-                            }
+                for (let color in colorFlags) {
+                    if (colorFlags[color] && colorExclusive) {
+                        excluded = setUnion(excluded, allMinusColor[color]);
+                    } else {
+                        excluded = setUnion(excluded, cardsContainingColor[color]);
+                    }
+                }
+                for (let format in formatFlags) {
+                    if (formatFlags[format]) {
+                        excluded = setUnion(excluded, allMinusFormat[format]);
+                    }
+                }
+                if (commandersOnly) {
+                    excluded = setUnion(excluded, allMinusCommanders);
+                }
+                if (!allowLands) {
+                    excluded = setUnion(excluded, lands);
+                }
+                if (excludedSets.length < Object.keys(setContains).length / 2) {
+                    excludedSets.forEach(set => {
+                        excluded = setUnion(excluded, setContains[set]);
+                    });
+                } else {
+                    let union = new Set();
+                    let excludedSetsSet = new Set(excludedSets);
+                    for (let set in setContains) {
+                        if (!excludedSetsSet.has(set)) {
+                            union  = setUnion(union, setContains[set]);
                         }
                     }
-                    for (let format in formatFlags) {
-                        if (formatFlags[format] && !formatsContainingCards[format].has(card.id)) {
-                            excluded.add(card.id);
-                        }
-                    }
-                    if (!allowLands && lands.has(card.id)) {
-                        excluded.add(card.id);
-                    }
-                    if (commandersOnly && !commanders.has(card.id)) {
-                        excluded.add(card.id);
-                    }
-                });
+                    excluded = setUnion(excluded, setDifference(allIds, union));
+                }
             }
             if (excluded.has(uuid)) {
                 if (excluded.size >= cards.length / 2) {
