@@ -10,10 +10,16 @@ let AUTH_PATH = "/.netlify/identity/user";
 dotenv.config();
 
 let express = require('express');
+const rateLimit = require("express-rate-limit");
+const limiter = rateLimit({
+    windowMs: 1000,
+    max: 100
+});
 let app = express();
 let bodyParser = require('body-parser');
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({extended: true}));
+app.use(limiter);
 let https = require('https');
 
 const SORTERS = {
@@ -172,7 +178,7 @@ async function preprocess() {
                 formatsContainingCards[format] = new Set();
             }
             if (legalities[format] === 'legal') {
-                formatsContainingCards[format].add(card.id)
+                formatsContainingCards[format].add(card.id);
             }
         }
         let type = card.type_line.split("—")[0];
@@ -495,7 +501,7 @@ app.post("/randomCard", (req, res, next) => {
                     let excludedSetsSet = new Set(excludedSets);
                     for (let set in setContains) {
                         if (!excludedSetsSet.has(set)) {
-                            union  = setUnion(union, setContains[set]);
+                            union = setUnion(union, setContains[set]);
                         }
                     }
                     excluded = setUnion(excluded, setDifference(allIds, union));
