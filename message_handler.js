@@ -12,8 +12,8 @@ dotenv.config();
 let express = require('express');
 const rateLimit = require("express-rate-limit");
 const limiter = rateLimit({
-    windowMs: 1000,
-    max: 100
+    windowMs: 15 * 60 * 1000,
+    max: 5000
 });
 let app = express();
 let bodyParser = require('body-parser');
