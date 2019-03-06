@@ -13,7 +13,7 @@ let express = require('express');
 const rateLimit = require("express-rate-limit");
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 5000
+    max: 1000
 });
 let app = express();
 let bodyParser = require('body-parser');
@@ -49,7 +49,13 @@ let allIds = new Set();
 let allMinusColor = new Set();
 let allMinusFormat = new Set();
 let allMinusCommanders = new Set();
+let basicLands = new Set();
+let tokenCards = new Set();
+let promoCards = new Set();
+let digitalCards = new Set();
+let sillyCards = new Set();
 
+let sillySets = new Set(['unh','ust','tunh','tust','tugl', 'ugl']);
 
 let privateKey = fs.readFileSync('./cert/privkey.pem', 'utf8');
 let cert = fs.readFileSync('./cert/fullchain.pem', 'utf8');
@@ -153,7 +159,7 @@ async function preprocess() {
         cards[i].likedCount = 0;
         cards[i].dislikedCount = 0;
         let card = cards[i];
-        if (card.lang !== "en" || !card.image_uris || card.type_line.includes('Basic Land')) {
+        if (card.lang !== "en" || !card.image_uris) {
             cards.splice(i, 1);
             i--;
             removedCtr++;
@@ -165,6 +171,9 @@ async function preprocess() {
             sets.push({code: card.set, name: card.set_name, release: card.released_at});
         }
         setContains[card.set].add(card.id);
+        if (sillySets.has(card.set)) {
+            sillyCards.add(card.id);
+        }
         uuidToIndex[card.id] = i;
         let colors = card.colors;
         if (colors) {
@@ -181,14 +190,20 @@ async function preprocess() {
                 formatsContainingCards[format].add(card.id);
             }
         }
-        let type = card.type_line.split("—")[0];
+        let type = card.type_line.split("—")[0].toLowerCase();
         type = type.replace(/\s/g, '');
         if (!cardTypes[type]) {
             cardTypes[type] = new Set();
         }
         cardTypes[type].add(card.id);
-        if (type.toLowerCase().includes('land')) {
+        if (type.includes('land')) {
             lands.add(card.id);
+            if (type.includes('basic')) {
+                basicLands.add(card.id);
+            }
+        }
+        if (type.includes('token')) {
+            tokenCards.add(card.id);
         }
         if (formatsContainingCards['commander'].has(card.id) && card.layout !== 'meld') {
             if (type.toLowerCase().includes('legendary') && type.toLowerCase().includes('creature')) {
@@ -197,6 +212,14 @@ async function preprocess() {
                 commanders.add(card.id);
             }
         }
+
+        if (card.digital) {
+            digitalCards.add(card.id);
+        }
+        if (card.promo) {
+            promoCards.add(card.id);
+        }
+
 
     }
     sets.sort((a, b) => {
@@ -426,13 +449,7 @@ app.post("/randomCard", (req, res, next) => {
     let userid = req.body.userid;
     let token = req.body.token;
     let uuid = cards[randomInt(0, cards.length)].id;
-    let filterSettings = JSON.parse(req.body.filter);
-    let colorExclusive = filterSettings.colorExclusive;
-    let colorFlags = filterSettings.colorFlags;
-    let formatFlags = filterSettings.formatFlags;
-    let allowLands = filterSettings.allowLands;
-    let commandersOnly = filterSettings.commandersOnly;
-    let excludedSets = filterSettings.excludedSets;
+    let filters = JSON.parse(req.body.filter);
 
     let likedParams = queryAllForUserParams(LIKED_TABLE, userid);
     let blockedParams = queryAllForUserParams(BLOCKED_TABLE, userid);
@@ -465,46 +482,61 @@ app.post("/randomCard", (req, res, next) => {
             res2.Items.forEach(item => {
                 excluded.add(item.uuid.S);
             });
-            if (filterSettings) {
-                if (colorExclusive) {
-                    for (let color in colorFlags) {
-                        if (colorFlags[color]) {
+            if (filters) {
+                if (filters.colorExclusive) {
+                    for (let color in filters.colorFlags) {
+                        if (filters.colorFlags[color]) {
                             excluded = setUnion(excluded, allMinusColor[color]);
                         } else {
                             excluded = setUnion(excluded, cardsContainingColor[color]);
                         }
                     }
                 } else {
-                    for (let color in colorFlags) {
-                        if (!colorFlags[color]) {
+                    for (let color in filters.colorFlags) {
+                        if (!filters.colorFlags[color]) {
                             excluded = setUnion(excluded, cardsContainingColor[color]);
                         }
                     }
                 }
-                for (let format in formatFlags) {
-                    if (formatFlags[format]) {
+                for (let format in filters.formatFlags) {
+                    if (filters.formatFlags[format]) {
                         excluded = setUnion(excluded, allMinusFormat[format]);
                     }
                 }
-                if (commandersOnly) {
+                if (filters.commandersOnly) {
                     excluded = setUnion(excluded, allMinusCommanders);
                 }
-                if (!allowLands) {
+                if (!filters.allowLands) {
                     excluded = setUnion(excluded, lands);
                 }
-                if (excludedSets.length < Object.keys(setContains).length / 2) {
-                    excludedSets.forEach(set => {
+                if (!filters.allowBasicLands) {
+                    excluded = setUnion(excluded, basicLands);
+                }
+                if (filters.excludedSets.length < Object.keys(setContains).length / 2) {
+                    filters.excludedSets.forEach(set => {
                         excluded = setUnion(excluded, setContains[set]);
                     });
                 } else {
                     let union = new Set();
-                    let excludedSetsSet = new Set(excludedSets);
+                    let excludedSetsSet = new Set(filters.excludedSets);
                     for (let set in setContains) {
                         if (!excludedSetsSet.has(set)) {
                             union = setUnion(union, setContains[set]);
                         }
                     }
                     excluded = setUnion(excluded, setDifference(allIds, union));
+                }
+                if (filters.excludeSilly) {
+                    excluded = setUnion(excluded, sillyCards);
+                }
+                if (filters.excludePromos) {
+                    excluded = setUnion(excluded, promoCards);
+                }
+                if (filters.excludeTokens) {
+                    excluded = setUnion(excluded, tokenCards);
+                }
+                if (filters.excludeDigital) {
+                    excluded = setUnion(excluded, digitalCards);
                 }
             }
             if (excluded.has(uuid)) {

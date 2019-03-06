@@ -5,3 +5,4 @@ node_modules/*
 card_to_db.js
 .idea/*
 auth_tester.js
+rateLimitTester.js
