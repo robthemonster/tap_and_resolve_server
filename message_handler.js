@@ -54,6 +54,7 @@ let tokenCards = new Set();
 let promoCards = new Set();
 let digitalCards = new Set();
 let sillyCards = new Set();
+let rarities = {};
 
 let sillySets = new Set(['unh','ust','tunh','tust','tugl', 'ugl']);
 
@@ -170,7 +171,12 @@ async function preprocess() {
             setContains[card.set] = new Set();
             sets.push({code: card.set, name: card.set_name, release: card.released_at});
         }
+
         setContains[card.set].add(card.id);
+        if (!rarities[card.rarity]){
+            rarities[card.rarity] = new Set;
+        }
+        rarities[card.rarity].add(card.id);
         if (sillySets.has(card.set)) {
             sillyCards.add(card.id);
         }
@@ -537,6 +543,13 @@ app.post("/randomCard", (req, res, next) => {
                 }
                 if (filters.excludeDigital) {
                     excluded = setUnion(excluded, digitalCards);
+                }
+                if (filters.rarityExclusions) {
+                    for (let rarity in filters.rarityExclusions) {
+                        if (filters.rarityExclusions[rarity]){
+                            excluded = setUnion(excluded, rarities[rarity]);
+                        }
+                    }
                 }
             }
             if (excluded.has(uuid)) {
