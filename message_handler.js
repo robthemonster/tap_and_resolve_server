@@ -244,9 +244,6 @@ async function preprocess() {
     for (let format in formatsContainingCards) {
         allMinusFormat[format] = setDifference(allIds, formatsContainingCards[format]);
     }
-    for (let artist in artists) {
-        allMinusArtist[artist] = setDifference(allIds, artists[artist]);
-    }
     allMinusCommanders = setDifference(allIds, commanders);
     console.log(`removed ${removedCtr} from dataset`);
     await new Promise((resolve, reject) => {
@@ -566,7 +563,7 @@ app.post("/randomCard", (req, res, next) => {
                     }
                 }
                 if (filters.artist && filters.artist !== "") {
-                    excluded = setUnion(excluded, allMinusArtist[filters.artist]);
+                    excluded = setUnion(excluded, setDifference(allIds, artists[filters.artist]));
                 }
             }
             if (excluded.has(uuid)) {
