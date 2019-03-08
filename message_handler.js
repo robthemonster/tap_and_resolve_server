@@ -55,8 +55,10 @@ let promoCards = new Set();
 let digitalCards = new Set();
 let sillyCards = new Set();
 let rarities = {};
+let artists = {};
+let allMinusArtist = new Set();
 
-let sillySets = new Set(['unh','ust','tunh','tust','tugl', 'ugl']);
+let sillySets = new Set(['unh', 'ust', 'tunh', 'tust', 'tugl', 'ugl']);
 
 let privateKey = fs.readFileSync('./cert/privkey.pem', 'utf8');
 let cert = fs.readFileSync('./cert/fullchain.pem', 'utf8');
@@ -171,12 +173,17 @@ async function preprocess() {
             setContains[card.set] = new Set();
             sets.push({code: card.set, name: card.set_name, release: card.released_at});
         }
-
         setContains[card.set].add(card.id);
-        if (!rarities[card.rarity]){
+        if (!rarities[card.rarity]) {
             rarities[card.rarity] = new Set;
         }
         rarities[card.rarity].add(card.id);
+        if (card.artist !== "") {
+            if (!artists[card.artist]) {
+                artists[card.artist] = new Set();
+            }
+            artists[card.artist].add(card.id);
+        }
         if (sillySets.has(card.set)) {
             sillyCards.add(card.id);
         }
@@ -237,6 +244,9 @@ async function preprocess() {
     for (let format in formatsContainingCards) {
         allMinusFormat[format] = setDifference(allIds, formatsContainingCards[format]);
     }
+    for (let artist in artists) {
+        allMinusArtist[artist] = setDifference(allIds, artists[artist]);
+    }
     allMinusCommanders = setDifference(allIds, commanders);
     console.log(`removed ${removedCtr} from dataset`);
     await new Promise((resolve, reject) => {
@@ -281,6 +291,10 @@ app.use(function (req, res, next) {
 
 app.post('/getSetCodes', (req, res, next) => {
     res.json(sets);
+});
+
+app.post('/getArtistNames', (req, res, next) => {
+    res.json(Object.keys(artists));
 });
 
 app.post('/getTopCards', (req, res, next) => {
@@ -546,10 +560,13 @@ app.post("/randomCard", (req, res, next) => {
                 }
                 if (filters.rarityExclusions) {
                     for (let rarity in filters.rarityExclusions) {
-                        if (filters.rarityExclusions[rarity]){
+                        if (filters.rarityExclusions[rarity]) {
                             excluded = setUnion(excluded, rarities[rarity]);
                         }
                     }
+                }
+                if (filters.artist && filters.artist !== "") {
+                    excluded = setUnion(excluded, allMinusArtist[filters.artist]);
                 }
             }
             if (excluded.has(uuid)) {
