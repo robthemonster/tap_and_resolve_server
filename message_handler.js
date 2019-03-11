@@ -56,6 +56,7 @@ let digitalCards = new Set();
 let sillyCards = new Set();
 let rarities = {};
 let artists = {};
+let artistNameSet = new Set();
 let allMinusArtist = new Set();
 
 let sillySets = new Set(['unh', 'ust', 'tunh', 'tust', 'tugl', 'ugl']);
@@ -119,6 +120,26 @@ function getAllFromTable(tablename, userid, res) {
             return a.name < b.name ? -1 : 1
         });
         res.json(cardsInTable);
+    });
+}
+
+function existsInTable(tablename, userid, uuid) {
+    console.log(" existo ", tablename, userid, uuid);
+    return new Promise((resolve, reject) => {
+        db.getItem({
+            TableName: tablename,
+            Key: {'userid': {'S': userid}, 'uuid': {'S': uuid}}
+        }).promise().then((data, error) => {
+            console.log("then", data, error);
+            if (data && data.Item) {
+                resolve(true);
+            } else {
+                resolve(false);
+            }
+        }).catch((err) => {
+            console.log("catch", err);
+            reject();
+        });
     });
 }
 
@@ -238,6 +259,8 @@ async function preprocess() {
     sets.sort((a, b) => {
         return new Date(b.release) - new Date(a.release);
     });
+    await countVotes();
+    artistNameSet = new Set(Object.keys(artists));
     for (let color in cardsContainingColor) {
         allMinusColor[color] = setDifference(allIds, cardsContainingColor[color]);
     }
@@ -246,7 +269,16 @@ async function preprocess() {
     }
     allMinusCommanders = setDifference(allIds, commanders);
     console.log(`removed ${removedCtr} from dataset`);
-    await new Promise((resolve, reject) => {
+
+}
+
+async function countVotes() {
+    let cardsCopy = cards;
+    for (let card in cardsCopy) {
+        cardsCopy[card].likedCount = 0;
+        cardsCopy[card].dislikedCount = 0;
+    }
+    await Promise.all([new Promise((resolve, reject) => {
         db.scan({TableName: LIKED_TABLE}, (error, data) => {
             if (error) {
                 console.log(error);
@@ -261,8 +293,7 @@ async function preprocess() {
             });
             resolve();
         });
-    });
-    await new Promise((resolve, reject) => {
+    }), new Promise((resolve, reject) => {
         db.scan({TableName: BLOCKED_TABLE}, (error, data) => {
             if (error) {
                 console.log(error);
@@ -277,7 +308,8 @@ async function preprocess() {
             });
             resolve();
         });
-    });
+    })]);
+    cards = cardsCopy;
 }
 
 app.use(function (req, res, next) {
@@ -335,18 +367,24 @@ app.post('/addCardToLiked', (req, res, next) => {
     let uuid = req.body.uuid;
     authenticateUser(userid, token)
         .then(() => {
-            putCardInTable(LIKED_TABLE, userid, uuid)
-                .then(() => {
-                    cards[uuidToIndex[uuid]].likedCount++;
-                    res.json(cards[uuidToIndex[uuid]]);
-                })
-                .catch(() => {
+            existsInTable(LIKED_TABLE, userid, uuid).then((exists) => {
+                if (exists) {
                     res.status(500).send({message: DB_WRITE_ERROR_MESSAGE});
-                });
-        })
-        .catch((err) => {
-            res.status(401).send({message: AUTH_FAILED_MESSAGE});
-        });
+                } else {
+                    putCardInTable(LIKED_TABLE, userid, uuid)
+                        .then((response) => {
+                            console.log('put then');
+                            cards[uuidToIndex[uuid]].likedCount++;
+                            res.json(cards[uuidToIndex[uuid]]);
+                        })
+                        .catch(() => {
+                            res.status(500).send({message: DB_WRITE_ERROR_MESSAGE});
+                        });
+                }
+            });
+        }).catch((err) => {
+        res.status(401).send({message: AUTH_FAILED_MESSAGE});
+    });
 });
 
 app.post('/addCardToBlocked', (req, res, next) => {
@@ -355,18 +393,24 @@ app.post('/addCardToBlocked', (req, res, next) => {
     let uuid = req.body.uuid;
     authenticateUser(userid, token)
         .then(() => {
-            putCardInTable(BLOCKED_TABLE, userid, uuid)
-                .then(() => {
-                    cards[uuidToIndex[uuid]].dislikedCount++;
-                    res.json(cards[uuidToIndex[uuid]]);
-                })
-                .catch(() => {
+            existsInTable(BLOCKED_TABLE, userid, uuid).then((exists) => {
+                if (exists) {
                     res.status(500).send({message: DB_WRITE_ERROR_MESSAGE});
-                });
-        })
-        .catch((err) => {
-            res.status(401).send({message: AUTH_FAILED_MESSAGE});
-        });
+                } else {
+                    putCardInTable(BLOCKED_TABLE, userid, uuid)
+                        .then((response) => {
+                            console.log("put block then");
+                            cards[uuidToIndex[uuid]].dislikedCount++;
+                            res.json(cards[uuidToIndex[uuid]]);
+                        })
+                        .catch(() => {
+                            res.status(500).send({message: DB_WRITE_ERROR_MESSAGE});
+                        });
+                }
+            });
+        }).catch((err) => {
+        res.status(401).send({message: AUTH_FAILED_MESSAGE});
+    });
 });
 
 app.post('/removeCardFromLiked', (req, res, next) => {
@@ -375,18 +419,24 @@ app.post('/removeCardFromLiked', (req, res, next) => {
     let uuid = req.body.uuid;
     authenticateUser(userid, token)
         .then(() => {
-            removeCardFromTable(LIKED_TABLE, userid, uuid)
-                .then(() => {
-                    cards[uuidToIndex[uuid]].likedCount--;
-                    res.json(cards[uuidToIndex[uuid]]);
-                })
-                .catch(() => {
+            existsInTable(LIKED_TABLE, userid, uuid).then((exists) => {
+                if (!exists) {
                     res.status(500).send({message: DB_WRITE_ERROR_MESSAGE});
-                });
-        })
-        .catch((err) => {
-            res.status(401).send({message: AUTH_FAILED_MESSAGE});
-        });
+                } else {
+                    removeCardFromTable(LIKED_TABLE, userid, uuid)
+                        .then((response) => {
+                            console.log("remove like");
+                            cards[uuidToIndex[uuid]].likedCount--;
+                            res.json(cards[uuidToIndex[uuid]]);
+                        })
+                        .catch(() => {
+                            res.status(500).send({message: DB_WRITE_ERROR_MESSAGE});
+                        });
+                }
+            });
+        }).catch((err) => {
+        res.status(401).send({message: AUTH_FAILED_MESSAGE});
+    });
 });
 
 app.post('/removeCardFromBlocked', (req, res, next) => {
@@ -395,18 +445,24 @@ app.post('/removeCardFromBlocked', (req, res, next) => {
     let uuid = req.body.uuid;
     authenticateUser(userid, token)
         .then(() => {
-            removeCardFromTable(BLOCKED_TABLE, userid, uuid)
-                .then(() => {
-                    cards[uuidToIndex[uuid]].dislikedCount--;
-                    res.json(cards[uuidToIndex[uuid]]);
-                })
-                .catch(() => {
+            existsInTable(BLOCKED_TABLE, userid, uuid).then((exists) => {
+                if (!exists) {
                     res.status(500).send({message: DB_WRITE_ERROR_MESSAGE});
-                });
-        })
-        .catch((err) => {
-            res.status(401).send({message: AUTH_FAILED_MESSAGE});
-        });
+                } else {
+                    removeCardFromTable(BLOCKED_TABLE, userid, uuid)
+                        .then((response) => {
+                            console.log("remove block");
+                            cards[uuidToIndex[uuid]].dislikedCount--;
+                            res.json(cards[uuidToIndex[uuid]]);
+                        })
+                        .catch(() => {
+                            res.status(500).send({message: DB_WRITE_ERROR_MESSAGE});
+                        });
+                }
+            });
+        }).catch((err) => {
+        res.status(401).send({message: AUTH_FAILED_MESSAGE});
+    });
 });
 
 app.post('/getUserCardStatus', (req, res, next) => {
@@ -562,7 +618,7 @@ app.post("/randomCard", (req, res, next) => {
                         }
                     }
                 }
-                if (filters.artist && filters.artist !== "") {
+                if (filters.artist && artistNameSet.has(filters.artist)) {
                     excluded = setUnion(excluded, setDifference(allIds, artists[filters.artist]));
                 }
             }
@@ -579,7 +635,7 @@ app.post("/randomCard", (req, res, next) => {
                         let no_card = {
                             name: "",
                             oracle_text: "",
-                            image_uris: {border_crop: "../assets/no_cards_remaining.png"}
+                            image_uris: {border_crop: "https://tapandresolve.com/assets/no_cards_remaining.png"}
                         };
                         res.json(no_card);
                         return;
@@ -602,5 +658,6 @@ app.post("/randomCard", (req, res, next) => {
 
 preprocess().then(() => {
     const httpsServer = https.createServer(credentials, app);
+    setInterval(countVotes, 5 * 60000);
     httpsServer.listen(443, () => console.log('listening'));
 });
