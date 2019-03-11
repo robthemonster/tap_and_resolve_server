@@ -124,13 +124,11 @@ function getAllFromTable(tablename, userid, res) {
 }
 
 function existsInTable(tablename, userid, uuid) {
-    console.log(" existo ", tablename, userid, uuid);
     return new Promise((resolve, reject) => {
         db.getItem({
             TableName: tablename,
             Key: {'userid': {'S': userid}, 'uuid': {'S': uuid}}
         }).promise().then((data, error) => {
-            console.log("then", data, error);
             if (data && data.Item) {
                 resolve(true);
             } else {
@@ -373,7 +371,6 @@ app.post('/addCardToLiked', (req, res, next) => {
                 } else {
                     putCardInTable(LIKED_TABLE, userid, uuid)
                         .then((response) => {
-                            console.log('put then');
                             cards[uuidToIndex[uuid]].likedCount++;
                             res.json(cards[uuidToIndex[uuid]]);
                         })
@@ -399,7 +396,6 @@ app.post('/addCardToBlocked', (req, res, next) => {
                 } else {
                     putCardInTable(BLOCKED_TABLE, userid, uuid)
                         .then((response) => {
-                            console.log("put block then");
                             cards[uuidToIndex[uuid]].dislikedCount++;
                             res.json(cards[uuidToIndex[uuid]]);
                         })
@@ -425,7 +421,6 @@ app.post('/removeCardFromLiked', (req, res, next) => {
                 } else {
                     removeCardFromTable(LIKED_TABLE, userid, uuid)
                         .then((response) => {
-                            console.log("remove like");
                             cards[uuidToIndex[uuid]].likedCount--;
                             res.json(cards[uuidToIndex[uuid]]);
                         })
@@ -451,7 +446,6 @@ app.post('/removeCardFromBlocked', (req, res, next) => {
                 } else {
                     removeCardFromTable(BLOCKED_TABLE, userid, uuid)
                         .then((response) => {
-                            console.log("remove block");
                             cards[uuidToIndex[uuid]].dislikedCount--;
                             res.json(cards[uuidToIndex[uuid]]);
                         })
