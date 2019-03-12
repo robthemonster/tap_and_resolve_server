@@ -513,6 +513,7 @@ app.post('/searchForCard', (req, res, next) => {
 });
 
 app.post("/randomCard", (req, res, next) => {
+    console.log("randomCard called");
     let userid = req.body.userid;
     let token = req.body.token;
     let uuid = cards[randomInt(0, cards.length)].id;
