@@ -1,8 +1,8 @@
 'use strict';
 
 const AUTH_FAILED_MESSAGE = "Failed to authenticate user";
-const NO_CARD_REMAINING_MESSAGE = "No cards remaining";
 const DB_WRITE_ERROR_MESSAGE = "Error writing to database";
+const ARGS_MISSING_MESSAGE = "Arguments missing from request";
 
 let dotenv = require('dotenv');
 let AUTH_SERVER = "tapandresolve.tk";
@@ -13,7 +13,7 @@ let express = require('express');
 const rateLimit = require("express-rate-limit");
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 1000
+    max: 2000
 });
 let app = express();
 let bodyParser = require('body-parser');
@@ -39,9 +39,7 @@ let cards = require("./scryfall-default-cards");
 let uuidToIndex = {};
 let cardsContainingColor = {"R": new Set(), "U": new Set(), "G": new Set(), "B": new Set(), "W": new Set()};
 let formatsContainingCards = {};
-let lands = new Set();
 let commanders = new Set();
-let cardTypes = {};
 let removedCtr = 0;
 let setContains = {};
 let sets = [];
@@ -49,15 +47,26 @@ let allIds = new Set();
 let allMinusColor = new Set();
 let allMinusFormat = new Set();
 let allMinusCommanders = new Set();
-let basicLands = new Set();
-let tokenCards = new Set();
-let promoCards = new Set();
-let digitalCards = new Set();
-let sillyCards = new Set();
+let types = {
+    'token': new Set(),
+    'basic': new Set(),
+    'land': new Set(),
+    'creature': new Set(),
+    'artifact': new Set(),
+    'enchantment': new Set(),
+    'planeswalker': new Set(),
+    'instant': new Set(),
+    'sorcery': new Set(),
+    'misc': new Set()
+};
+let categories = {
+    'digital': new Set(),
+    'promo': new Set(),
+    'silly': new Set()
+};
 let rarities = {};
 let artists = {};
 let artistNameSet = new Set();
-let allMinusArtist = new Set();
 
 let sillySets = new Set(['unh', 'ust', 'tunh', 'tust', 'tugl', 'ugl']);
 
@@ -70,6 +79,97 @@ aws.config.update({region: 'us-east-2', accessKeyId: process.env.AWS_API_ID, sec
 let db = new aws.DynamoDB({apiVersion: '2019-02-16'});
 const LIKED_TABLE = "cards_liked";
 const BLOCKED_TABLE = "cards_blocked";
+
+async function preprocess() {
+
+    for (let i = 0; i < cards.length; i++) {
+        cards[i].likedCount = 0;
+        cards[i].dislikedCount = 0;
+        let card = cards[i];
+        if (card.lang !== "en" || !card.image_uris) {
+            cards.splice(i, 1);
+            i--;
+            removedCtr++;
+            continue;
+        }
+        allIds.add(card.id);
+        if (!setContains[card.set]) {
+            setContains[card.set] = new Set();
+            sets.push({code: card.set, name: card.set_name, release: card.released_at});
+        }
+        setContains[card.set].add(card.id);
+        if (!rarities[card.rarity]) {
+            rarities[card.rarity] = new Set;
+        }
+        rarities[card.rarity].add(card.id);
+        if (card.artist !== "") {
+            if (!artists[card.artist]) {
+                artists[card.artist] = new Set();
+            }
+            artists[card.artist].add(card.id);
+        }
+        if (sillySets.has(card.set)) {
+            categories['silly'].add(card.id);
+        }
+        if (card.digital) {
+            categories['digital'].add(card.id);
+        }
+        if (card.promo) {
+            categories['promo'].add(card.id);
+        }
+        uuidToIndex[card.id] = i;
+        let colors = card.colors;
+        if (colors) {
+            colors.forEach(color => {
+                cardsContainingColor[color].add(card.id);
+            });
+        }
+        let legalities = card.legalities;
+        for (let format in legalities) {
+            if (!formatsContainingCards[format]) {
+                formatsContainingCards[format] = new Set();
+            }
+            if (legalities[format] === 'legal') {
+                formatsContainingCards[format].add(card.id);
+            }
+        }
+        let type = card.type_line.split("—")[0].toLowerCase();
+        type = type.replace(/\s/g, '');
+        let isMisc = true;
+        for (let superType in types) {
+            if (type.includes(superType)) {
+                isMisc = false;
+                types[superType].add(card.id);
+            }
+        }
+        if (isMisc) {
+            types['misc'].add(card.id);
+        }
+        if (formatsContainingCards['commander'].has(card.id) && card.layout !== 'meld') {
+            if (type.toLowerCase().includes('legendary') && type.toLowerCase().includes('creature')) {
+                commanders.add(card.id);
+            } else if (type.toLowerCase().includes('planeswalker') && card.oracle_text && card.oracle_text.includes(`${card.name} can be your commander`)) {
+                commanders.add(card.id);
+            }
+        }
+
+
+    }
+    sets.sort((a, b) => {
+        return new Date(b.release) - new Date(a.release);
+    });
+    await countVotes();
+    artistNameSet = new Set(Object.keys(artists));
+    for (let color in cardsContainingColor) {
+        allMinusColor[color] = setDifference(allIds, cardsContainingColor[color]);
+    }
+    for (let format in formatsContainingCards) {
+        allMinusFormat[format] = setDifference(allIds, formatsContainingCards[format]);
+    }
+    allMinusCommanders = setDifference(allIds, commanders);
+    console.log(`removed ${removedCtr} from dataset`);
+
+}
 
 function setDifference(a, b) {
     let diff = new Set(a);
@@ -175,100 +275,6 @@ function authenticateUser(userid, token) {
     });
 }
 
-async function preprocess() {
-
-    for (let i = 0; i < cards.length; i++) {
-        cards[i].likedCount = 0;
-        cards[i].dislikedCount = 0;
-        let card = cards[i];
-        if (card.lang !== "en" || !card.image_uris) {
-            cards.splice(i, 1);
-            i--;
-            removedCtr++;
-            continue;
-        }
-        allIds.add(card.id);
-        if (!setContains[card.set]) {
-            setContains[card.set] = new Set();
-            sets.push({code: card.set, name: card.set_name, release: card.released_at});
-        }
-        setContains[card.set].add(card.id);
-        if (!rarities[card.rarity]) {
-            rarities[card.rarity] = new Set;
-        }
-        rarities[card.rarity].add(card.id);
-        if (card.artist !== "") {
-            if (!artists[card.artist]) {
-                artists[card.artist] = new Set();
-            }
-            artists[card.artist].add(card.id);
-        }
-        if (sillySets.has(card.set)) {
-            sillyCards.add(card.id);
-        }
-        uuidToIndex[card.id] = i;
-        let colors = card.colors;
-        if (colors) {
-            colors.forEach(color => {
-                cardsContainingColor[color].add(card.id);
-            });
-        }
-        let legalities = card.legalities;
-        for (let format in legalities) {
-            if (!formatsContainingCards[format]) {
-                formatsContainingCards[format] = new Set();
-            }
-            if (legalities[format] === 'legal') {
-                formatsContainingCards[format].add(card.id);
-            }
-        }
-        let type = card.type_line.split("—")[0].toLowerCase();
-        type = type.replace(/\s/g, '');
-        if (!cardTypes[type]) {
-            cardTypes[type] = new Set();
-        }
-        cardTypes[type].add(card.id);
-        if (type.includes('land')) {
-            lands.add(card.id);
-            if (type.includes('basic')) {
-                basicLands.add(card.id);
-            }
-        }
-        if (type.includes('token')) {
-            tokenCards.add(card.id);
-        }
-        if (formatsContainingCards['commander'].has(card.id) && card.layout !== 'meld') {
-            if (type.toLowerCase().includes('legendary') && type.toLowerCase().includes('creature')) {
-                commanders.add(card.id);
-            } else if (type.toLowerCase().includes('planeswalker') && card.oracle_text && card.oracle_text.includes(`${card.name} can be your commander`)) {
-                commanders.add(card.id);
-            }
-        }
-
-        if (card.digital) {
-            digitalCards.add(card.id);
-        }
-        if (card.promo) {
-            promoCards.add(card.id);
-        }
-
-
-    }
-    sets.sort((a, b) => {
-        return new Date(b.release) - new Date(a.release);
-    });
-    await countVotes();
-    artistNameSet = new Set(Object.keys(artists));
-    for (let color in cardsContainingColor) {
-        allMinusColor[color] = setDifference(allIds, cardsContainingColor[color]);
-    }
-    for (let format in formatsContainingCards) {
-        allMinusFormat[format] = setDifference(allIds, formatsContainingCards[format]);
-    }
-    allMinusCommanders = setDifference(allIds, commanders);
-    console.log(`removed ${removedCtr} from dataset`);
-
-}
 
 async function countVotes() {
     let cardsCopy = cards;
@@ -284,7 +290,6 @@ async function countVotes() {
             }
             data.Items.forEach(item => {
                 if (!cards[uuidToIndex[item.uuid.S]]) {
-                    console.log(item.uuid.S + " not found in cards array");
                 } else {
                     cards[uuidToIndex[item.uuid.S]].likedCount++;
                 }
@@ -299,7 +304,6 @@ async function countVotes() {
             }
             data.Items.forEach(item => {
                 if (!cards[uuidToIndex[item.uuid.S]]) {
-                    console.log(item.uuid.S + " not found in cards array");
                 } else {
                     cards[uuidToIndex[item.uuid.S]].dislikedCount++;
                 }
@@ -463,6 +467,9 @@ app.post('/getUserCardStatus', (req, res, next) => {
     let userid = req.body.userid;
     let token = req.body.token;
     let uuid = req.body.uuid;
+    if (!userid || !token || !uuid) {
+        res.status(400).send({message: ARGS_MISSING_MESSAGE});
+    }
     authenticateUser(userid, token).then(() => {
         let existsInLikedParams = {
             TableName: LIKED_TABLE,
@@ -513,7 +520,7 @@ app.post('/searchForCard', (req, res, next) => {
 });
 
 app.post("/randomCard", (req, res, next) => {
-    console.log("randomCard called");
+    console.log("randomCard called", new Date().toISOString());
     let userid = req.body.userid;
     let token = req.body.token;
     let uuid = cards[randomInt(0, cards.length)].id;
@@ -571,15 +578,20 @@ app.post("/randomCard", (req, res, next) => {
                         excluded = setUnion(excluded, allMinusFormat[format]);
                     }
                 }
+                for (let type in filters.allowedTypes) {
+                    if (!filters.allowedTypes[type]) {
+                        excluded = setUnion(excluded, types[type]);
+                    }
+                }
+                for (let category in filters.allowedCategories) {
+                    if (!filters.allowedCategories[category]) {
+                        excluded = setUnion(excluded, categories[category]);
+                    }
+                }
                 if (filters.commandersOnly) {
                     excluded = setUnion(excluded, allMinusCommanders);
                 }
-                if (!filters.allowLands) {
-                    excluded = setUnion(excluded, lands);
-                }
-                if (!filters.allowBasicLands) {
-                    excluded = setUnion(excluded, basicLands);
-                }
+
                 if (filters.excludedSets.length < Object.keys(setContains).length / 2) {
                     filters.excludedSets.forEach(set => {
                         excluded = setUnion(excluded, setContains[set]);
@@ -594,18 +606,7 @@ app.post("/randomCard", (req, res, next) => {
                     }
                     excluded = setUnion(excluded, setDifference(allIds, union));
                 }
-                if (filters.excludeSilly) {
-                    excluded = setUnion(excluded, sillyCards);
-                }
-                if (filters.excludePromos) {
-                    excluded = setUnion(excluded, promoCards);
-                }
-                if (filters.excludeTokens) {
-                    excluded = setUnion(excluded, tokenCards);
-                }
-                if (filters.excludeDigital) {
-                    excluded = setUnion(excluded, digitalCards);
-                }
+
                 if (filters.rarityExclusions) {
                     for (let rarity in filters.rarityExclusions) {
                         if (filters.rarityExclusions[rarity]) {
