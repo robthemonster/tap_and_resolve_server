@@ -155,6 +155,10 @@ async function preprocess() {
 
 
     }
+
+    types['basic'] = setDifference(types['land'], setDifference(types['land'], types['basic']));
+    types['land'] = setDifference(types['land'], types['basic']);
+
     sets.sort((a, b) => {
         return new Date(b.release) - new Date(a.release);
     });
