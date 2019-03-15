@@ -334,7 +334,14 @@ app.post('/getArtistNames', (req, res, next) => {
 
 app.post('/getTopCards', (req, res, next) => {
     let sort = req.body.sort;
-    let sorted = cards.concat().sort(SORTERS[sort]).splice(0, 100);
+    let list = cards.concat();
+    if (req.body.commandersOnly) {
+        list = [];
+        commanders.forEach(function (id) {
+            list.push(cards[uuidToIndex[id]]);
+        });
+    }
+    let sorted = list.sort(SORTERS[sort]).splice(0, 100);
     res.json(sorted);
 });
 
