@@ -530,13 +530,88 @@ app.post('/searchForCard', (req, res, next) => {
     res.json({cards: page, numPages: Math.ceil(results.length / pageSize)});
 });
 
-app.post("/randomCard", (req, res, next) => {
-    console.log("randomCard called", new Date().toISOString());
+function buildFilters(filters) {
+    let excluded = new Set();
+    if (filters.colorExclusive) {
+        for (let color in filters.colorFlags) {
+            if (filters.colorFlags[color]) {
+                excluded = setUnion(excluded, allMinusColor[color]);
+            } else {
+                excluded = setUnion(excluded, cardsContainingColor[color]);
+            }
+        }
+    } else {
+        for (let color in filters.colorFlags) {
+            if (!filters.colorFlags[color]) {
+                excluded = setUnion(excluded, cardsContainingColor[color]);
+            }
+        }
+    }
+    for (let format in filters.formatFlags) {
+        if (filters.formatFlags[format]) {
+            excluded = setUnion(excluded, allMinusFormat[format]);
+        }
+    }
+    for (let type in filters.allowedTypes) {
+        if (!filters.allowedTypes[type]) {
+            excluded = setUnion(excluded, types[type]);
+        }
+    }
+    for (let category in filters.allowedCategories) {
+        if (!filters.allowedCategories[category]) {
+            excluded = setUnion(excluded, categories[category]);
+        }
+    }
+    if (filters.commandersOnly) {
+        excluded = setUnion(excluded, allMinusCommanders);
+    }
+
+    if (filters.excludedSets.length < Object.keys(setContains).length / 2) {
+        filters.excludedSets.forEach(set => {
+            excluded = setUnion(excluded, setContains[set]);
+        });
+    } else {
+        let union = new Set();
+        let excludedSetsSet = new Set(filters.excludedSets);
+        for (let set in setContains) {
+            if (!excludedSetsSet.has(set)) {
+                union = setUnion(union, setContains[set]);
+            }
+        }
+        excluded = setUnion(excluded, setDifference(allIds, union));
+    }
+
+    if (filters.rarityExclusions) {
+        for (let rarity in filters.rarityExclusions) {
+            if (filters.rarityExclusions[rarity]) {
+                excluded = setUnion(excluded, rarities[rarity]);
+            }
+        }
+    }
+    if (filters.artist && artistNameSet.has(filters.artist)) {
+        excluded = setUnion(excluded, setDifference(allIds, artists[filters.artist]));
+    }
+    return excluded;
+}
+
+app.post('/getFilterSize', (req, res, next) => {
     let userid = req.body.userid;
     let token = req.body.token;
-    let uuid = cards[randomInt(0, cards.length)].id;
-    let filters = JSON.parse(req.body.filter);
+    let filters = JSON.parse(req.body.filters);
+    const authentication = getAuthenticationPromise(userid, token);
+    authentication.then(([liked_promise, disliked_promise]) => {
+        Promise.all([liked_promise, disliked_promise]).then(([liked, disliked]) => {
+            let excluded = new Set();
+            liked.Items.concat(disliked.Items).forEach(item => {
+                excluded.add(item.uuid.S);
+            });
+            excluded = setUnion(excluded, buildFilters(filters));
+            res.json({numLeft: cards.length - excluded.size});
+        })
+    })
+});
 
+function getAuthenticationPromise(userid, token) {
     let likedParams = queryAllForUserParams(LIKED_TABLE, userid);
     let blockedParams = queryAllForUserParams(BLOCKED_TABLE, userid);
     let liked_promise = new Promise((resolve, reject) => {
@@ -546,88 +621,37 @@ app.post("/randomCard", (req, res, next) => {
         resolve({Items: []})
     });
     let authentication = new Promise((resolve, reject) => {
-        resolve()
+        resolve([liked_promise, blocked_promise]);
     });
     if (userid && token) {
         authentication = new Promise((resolve, reject) => {
             authenticateUser(userid, token).then(() => {
                 liked_promise = db.query(likedParams).promise();
                 blocked_promise = db.query(blockedParams).promise();
-                resolve();
+                resolve([liked_promise, blocked_promise]);
             }).catch((error) => {
                 reject(error)
             });
         });
     }
-    authentication.then(() => {
+    return authentication;
+}
+
+app.post("/randomCard", (req, res, next) => {
+    console.log("randomCard called", new Date().toISOString());
+    let userid = req.body.userid;
+    let token = req.body.token;
+    let uuid = cards[randomInt(0, cards.length)].id;
+    let filters = JSON.parse(req.body.filter);
+    const authentication = getAuthenticationPromise(userid, token);
+    authentication.then(([liked_promise, blocked_promise]) => {
         Promise.all([liked_promise, blocked_promise]).then(([res1, res2]) => {
             let excluded = new Set();
-            res1.Items.forEach(item => {
-                excluded.add(item.uuid.S);
-            });
-            res2.Items.forEach(item => {
+            res1.Items.concat(res2.Items).forEach(item => {
                 excluded.add(item.uuid.S);
             });
             if (filters) {
-                if (filters.colorExclusive) {
-                    for (let color in filters.colorFlags) {
-                        if (filters.colorFlags[color]) {
-                            excluded = setUnion(excluded, allMinusColor[color]);
-                        } else {
-                            excluded = setUnion(excluded, cardsContainingColor[color]);
-                        }
-                    }
-                } else {
-                    for (let color in filters.colorFlags) {
-                        if (!filters.colorFlags[color]) {
-                            excluded = setUnion(excluded, cardsContainingColor[color]);
-                        }
-                    }
-                }
-                for (let format in filters.formatFlags) {
-                    if (filters.formatFlags[format]) {
-                        excluded = setUnion(excluded, allMinusFormat[format]);
-                    }
-                }
-                for (let type in filters.allowedTypes) {
-                    if (!filters.allowedTypes[type]) {
-                        excluded = setUnion(excluded, types[type]);
-                    }
-                }
-                for (let category in filters.allowedCategories) {
-                    if (!filters.allowedCategories[category]) {
-                        excluded = setUnion(excluded, categories[category]);
-                    }
-                }
-                if (filters.commandersOnly) {
-                    excluded = setUnion(excluded, allMinusCommanders);
-                }
-
-                if (filters.excludedSets.length < Object.keys(setContains).length / 2) {
-                    filters.excludedSets.forEach(set => {
-                        excluded = setUnion(excluded, setContains[set]);
-                    });
-                } else {
-                    let union = new Set();
-                    let excludedSetsSet = new Set(filters.excludedSets);
-                    for (let set in setContains) {
-                        if (!excludedSetsSet.has(set)) {
-                            union = setUnion(union, setContains[set]);
-                        }
-                    }
-                    excluded = setUnion(excluded, setDifference(allIds, union));
-                }
-
-                if (filters.rarityExclusions) {
-                    for (let rarity in filters.rarityExclusions) {
-                        if (filters.rarityExclusions[rarity]) {
-                            excluded = setUnion(excluded, rarities[rarity]);
-                        }
-                    }
-                }
-                if (filters.artist && artistNameSet.has(filters.artist)) {
-                    excluded = setUnion(excluded, setDifference(allIds, artists[filters.artist]));
-                }
+                excluded = setUnion(excluded, buildFilters(filters));
             }
             if (excluded.has(uuid)) {
                 if (excluded.size >= cards.length / 2) {
