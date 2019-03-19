@@ -503,6 +503,11 @@ app.post('/getUserCardStatus', (req, res, next) => {
     });
 });
 
+app.post('/getLikedRatio', (req, res, next) => {
+    let uuid = req.body.uuid;
+    res.json(cards[uuidToIndex[uuid]]);
+});
+
 app.post('/searchForCard', (req, res, next) => {
     if (!req.body.searchString || req.body.searchString.length < 3) {
         res.json({cards: [], numPages: 0});
@@ -515,7 +520,7 @@ app.post('/searchForCard', (req, res, next) => {
     let results = [];
     for (let index in cards) {
         let card = cards[index];
-        if (!taken.has(card.id) && card.name.toLowerCase().includes(searchString)) {
+        if (!taken.has(card.id) && card.name.toLowerCase().includes(searchString) && !card.reprint) {
             results.push(card);
         }
     }
