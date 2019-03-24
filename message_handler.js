@@ -80,6 +80,8 @@ let db = new aws.DynamoDB({apiVersion: '2019-02-16'});
 const LIKED_TABLE = "cards_liked";
 const BLOCKED_TABLE = "cards_blocked";
 
+let cmcs = {};
+let allMinusCmc = {};
 async function preprocess() {
 
     for (let i = 0; i < cards.length; i++) {
@@ -93,6 +95,10 @@ async function preprocess() {
             continue;
         }
         allIds.add(card.id);
+        if (!cmcs[card.cmc]) {
+            cmcs[card.cmc] = new Set();
+        }
+        cmcs[card.cmc].add(card.id);
         if (!setContains[card.set]) {
             setContains[card.set] = new Set();
             sets.push({code: card.set, name: card.set_name, release: card.released_at});
@@ -154,6 +160,10 @@ async function preprocess() {
         }
 
 
+    }
+
+    for (let cmc in cmcs) {
+        allMinusCmc[cmc] = setDifference(allIds, cmcs[cmc]);
     }
 
     types['basic'] = setDifference(types['land'], setDifference(types['land'], types['basic']));
@@ -535,7 +545,7 @@ app.post('/searchForCard', (req, res, next) => {
     res.json({cards: page, numPages: Math.ceil(results.length / pageSize)});
 });
 
-function buildFilters(filters) {
+function buildExcludedSet(filters) {
     let excluded = new Set();
     if (filters.colorExclusive) {
         for (let color in filters.colorFlags) {
@@ -569,6 +579,9 @@ function buildFilters(filters) {
     }
     if (filters.commandersOnly) {
         excluded = setUnion(excluded, allMinusCommanders);
+    }
+    if (filters.restrictCmc){
+        excluded = setUnion(excluded, allMinusCmc[filters.cmc]);
     }
 
     if (filters.excludedSets.length < Object.keys(setContains).length / 2) {
@@ -610,7 +623,7 @@ app.post('/getFilterSize', (req, res, next) => {
             liked.Items.concat(disliked.Items).forEach(item => {
                 excluded.add(item.uuid.S);
             });
-            excluded = setUnion(excluded, buildFilters(filters));
+            excluded = setUnion(excluded, buildExcludedSet(filters));
             res.json({numLeft: cards.length - excluded.size});
         })
     })
@@ -656,7 +669,7 @@ app.post("/randomCard", (req, res, next) => {
                 excluded.add(item.uuid.S);
             });
             if (filters) {
-                excluded = setUnion(excluded, buildFilters(filters));
+                excluded = setUnion(excluded, buildExcludedSet(filters));
             }
             if (excluded.has(uuid)) {
                 if (excluded.size >= cards.length / 2) {
