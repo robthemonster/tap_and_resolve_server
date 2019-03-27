@@ -5,7 +5,7 @@ const DB_WRITE_ERROR_MESSAGE = "Error writing to database";
 const ARGS_MISSING_MESSAGE = "Arguments missing from request";
 
 let dotenv = require('dotenv');
-let AUTH_SERVER = "tapandresolve.tk";
+let AUTH_SERVER = "tapandresolve.com";
 let AUTH_PATH = "/.netlify/identity/user";
 dotenv.config();
 
@@ -82,6 +82,7 @@ const BLOCKED_TABLE = "cards_blocked";
 
 let cmcs = {};
 let allMinusCmc = {};
+
 async function preprocess() {
 
     for (let i = 0; i < cards.length; i++) {
@@ -226,12 +227,21 @@ function queryAllForUserParams(tablename, userid) {
 function getAllFromTable(tablename, userid, res) {
     let cardsInTable = [];
     db.query(queryAllForUserParams(tablename, userid)).promise().then(result => {
-        result.Items.forEach(item => {
+        const items = result.Items.sort((a, b) => {
+            const timestampA = a.timestamp ? parseInt(a.timestamp.N) : 0;
+            const timestampB = b.timestamp ? parseInt(b.timestamp.N) : 0;
+            const compare = new Date(timestampA) - new Date(timestampB);
+            if (compare === 0) {
+                let uuidA = a.uuid.S;
+                let uuidB = b.uuid.S;
+                return cards[uuidToIndex[uuidA]].name < cards[uuidToIndex[uuidB]].name ? -1 : 1;
+            } else {
+                return -compare;
+            }
+        });
+        items.forEach(item => {
             let uuid = item.uuid.S;
             cardsInTable.push(cards[uuidToIndex[uuid]]);
-        });
-        cardsInTable.sort((a, b) => {
-            return a.name < b.name ? -1 : 1
         });
         res.json(cardsInTable);
     });
@@ -256,7 +266,10 @@ function existsInTable(tablename, userid, uuid) {
 }
 
 function putCardInTable(tablename, userid, uuid) {
-    return db.putItem({TableName: tablename, Item: {'userid': {'S': userid}, 'uuid': {'S': uuid}}}).promise();
+    return db.putItem({
+        TableName: tablename,
+        Item: {'userid': {'S': userid}, 'uuid': {'S': uuid}, 'timestamp': {'N': Date.now().toString()}}
+    }).promise();
 }
 
 function removeCardFromTable(tablename, userid, uuid) {
@@ -580,7 +593,7 @@ function buildExcludedSet(filters) {
     if (filters.commandersOnly) {
         excluded = setUnion(excluded, allMinusCommanders);
     }
-    if (filters.restrictCmc){
+    if (filters.restrictCmc) {
         excluded = setUnion(excluded, allMinusCmc[filters.cmc]);
     }
 
