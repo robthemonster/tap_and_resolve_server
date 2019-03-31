@@ -224,9 +224,9 @@ function queryAllForUserParams(tablename, userid) {
     };
 }
 
-function getAllFromTable(tablename, userid, res) {
+async function getAllFromTable(tablename, userid) {
     let cardsInTable = [];
-    db.query(queryAllForUserParams(tablename, userid)).promise().then(result => {
+    await db.query(queryAllForUserParams(tablename, userid)).promise().then(result => {
         const items = result.Items.sort((a, b) => {
             const timestampA = a.timestamp ? parseInt(a.timestamp.N) : 0;
             const timestampB = b.timestamp ? parseInt(b.timestamp.N) : 0;
@@ -241,10 +241,12 @@ function getAllFromTable(tablename, userid, res) {
         });
         items.forEach(item => {
             let uuid = item.uuid.S;
-            cardsInTable.push(cards[uuidToIndex[uuid]]);
+            let card = cards[uuidToIndex[uuid]];
+            card.timestamp = item.timestamp ? parseInt(item.timestamp.N) : 0;
+            cardsInTable.push(card);
         });
-        res.json(cardsInTable);
     });
+    return cardsInTable;
 }
 
 function existsInTable(tablename, userid, uuid) {
@@ -373,12 +375,34 @@ app.post('/handleIdentityEvent', (req, res, next) => {
     console.log(event);
 });
 
+function getPage(cards, page, page_size, filter) {
+
+    const filteredCards = [];
+    const autocomplete = {};
+    for (let card in cards) {
+        if (cards[card].name.toLowerCase().includes(filter.toLowerCase())) {
+            autocomplete[cards[card].name] = null;
+            filteredCards.push(cards[card]);
+        }
+    }
+    if (page * page_size >= cards.length) {
+        return {cards: [], autocomplete: autocomplete, size: cards.length};
+    }
+    const card_page = filteredCards.slice(page * page_size, Math.min(cards.length, (page + 1) * page_size));
+    return {cards: card_page, autocomplete: autocomplete, size: filteredCards.length};
+}
+
 app.post('/getBlocked', (req, res, next) => {
     let userid = req.body.userid;
     let token = req.body.token;
+    const page = req.body.page;
+    const page_size = req.body.pageSize;
+    const filter = req.body.filterString;
     authenticateUser(userid, token)
         .then(() => {
-            getAllFromTable(BLOCKED_TABLE, userid, res)
+            getAllFromTable(BLOCKED_TABLE, userid).then(cards => {
+                res.json(getPage(cards, page, page_size, filter));
+            });
         })
         .catch(() => {
             res.status(401).send({message: AUTH_FAILED_MESSAGE});
@@ -388,9 +412,14 @@ app.post('/getBlocked', (req, res, next) => {
 app.post('/getLiked', (req, res, next) => {
     let userid = req.body.userid;
     let token = req.body.token;
+    const page = req.body.page;
+    const page_size = req.body.pageSize;
+    const filter = req.body.filterString;
     authenticateUser(userid, token)
         .then(() => {
-            getAllFromTable(LIKED_TABLE, userid, res);
+            getAllFromTable(LIKED_TABLE, userid).then(cards => {
+                res.json(getPage(cards, page, page_size, filter));
+            });
         })
         .catch(() => {
             res.status(401).send({message: AUTH_FAILED_MESSAGE});
