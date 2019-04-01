@@ -381,7 +381,9 @@ function getPage(cards, page, page_size, filter) {
     const autocomplete = {};
     for (let card in cards) {
         if (cards[card].name.toLowerCase().includes(filter.toLowerCase())) {
-            autocomplete[cards[card].name] = null;
+            if (Object.keys(autocomplete).length < 50) {
+                autocomplete[cards[card].name] = null;
+            }
             filteredCards.push(cards[card]);
         }
     }
