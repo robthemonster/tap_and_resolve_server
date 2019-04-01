@@ -666,7 +666,9 @@ app.post('/getFilterSize', (req, res, next) => {
         Promise.all([liked_promise, disliked_promise]).then(([liked, disliked]) => {
             let excluded = new Set();
             liked.Items.concat(disliked.Items).forEach(item => {
-                excluded.add(item.uuid.S);
+                if (!!uuidToIndex[item.uuid.S]) {
+                    excluded.add(item.uuid.S);
+                }
             });
             excluded = setUnion(excluded, buildExcludedSet(filters));
             res.json({numLeft: cards.length - excluded.size});
