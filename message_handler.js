@@ -227,7 +227,8 @@ function queryAllForUserParams(tablename, userid) {
 async function getAllFromTable(tablename, userid) {
     let cardsInTable = [];
     await db.query(queryAllForUserParams(tablename, userid)).promise().then(result => {
-        const items = result.Items.sort((a, b) => {
+        let items = result.Items.filter(item => !!uuidToIndex[item.uuid.S]);
+        items = items.sort((a, b) => {
             const timestampA = a.timestamp ? parseInt(a.timestamp.N) : 0;
             const timestampB = b.timestamp ? parseInt(b.timestamp.N) : 0;
             const compare = new Date(timestampA) - new Date(timestampB);
