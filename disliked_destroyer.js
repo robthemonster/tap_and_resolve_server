@@ -1,3 +1,4 @@
+//This file puts every card on your disliked list. This is strictly for bug-fixing purposes
 let cards = require("./scryfall-default-cards");
 let fs = require('fs');
 
